@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Bookmark, ExternalLink, Sparkles } from "lucide-react";
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 import type { Route } from "next";
 
 export type WhyThisItem = {
@@ -77,7 +77,6 @@ export function IssueListItem({ issue, href, isSaved, onToggleSaved }: IssueList
                 </div>
               </>
             ) : null}
-            {/* Why This? tooltip - shows matched profile entities */}
             {issue.whyThis && issue.whyThis.length > 0 && (
               <>
                 <div className="h-0.5 w-0.5 rounded-full" style={{ backgroundColor: "#8A90B2" }} />
@@ -111,7 +110,6 @@ export function IssueListItem({ issue, href, isSaved, onToggleSaved }: IssueList
                 height="36"
                 viewBox="0 0 36 36"
               >
-                {/* Background circle */}
                 <circle
                   cx="18"
                   cy="18"
@@ -120,7 +118,6 @@ export function IssueListItem({ issue, href, isSaved, onToggleSaved }: IssueList
                   stroke="rgba(138, 92, 255, 0.15)"
                   strokeWidth="3"
                 />
-                {/* Progress circle */}
                 <circle
                   cx="18"
                   cy="18"

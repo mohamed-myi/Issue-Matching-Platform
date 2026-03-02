@@ -6,7 +6,7 @@ import { Menu, Search, Bookmark, User } from "lucide-react";
 import { useState } from "react";
 import type { Route } from "next";
 import { setQueryParam } from "@/lib/url";
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 
 type TopNavProps = {
   activeTab: "browse" | "dashboard" | "for-you" | null;

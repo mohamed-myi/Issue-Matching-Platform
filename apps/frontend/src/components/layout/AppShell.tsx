@@ -6,7 +6,7 @@ import type { Route } from "next";
 import { useQuery } from "@tanstack/react-query";
 import { fetchLanguages, fetchRepositories } from "@/lib/api/endpoints";
 import { setQueryParam } from "@/lib/url";
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 import { TopNav } from "./TopNav";
 import { FilterSidebar, type FilterState } from "./FilterSidebar";
 
@@ -28,7 +28,9 @@ export function AppShell({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [filterDataEnabled, setFilterDataEnabled] = useState(false);
+  const [repoDataEnabled, setRepoDataEnabled] = useState(false);
 
   const filterState: FilterState = useMemo(
     () => ({
@@ -50,10 +52,21 @@ export function AppShell({
     router.replace((url.pathname + url.search) as Route);
   }
 
+  function toggleSidebar() {
+    setSidebarOpen((current) => {
+      const next = !current;
+      if (next) {
+        setFilterDataEnabled(true);
+      }
+      return next;
+    });
+  }
+
   const languagesQuery = useQuery({
     queryKey: ["taxonomy", "languages"],
     queryFn: fetchLanguages,
     staleTime: 1000 * 60 * 30,
+    enabled: filterDataEnabled,
   });
 
   const reposQuery = useQuery({
@@ -65,6 +78,7 @@ export function AppShell({
         limit: 25,
       }),
     staleTime: 1000 * 60 * 10,
+    enabled: repoDataEnabled,
   });
 
   const languages = useMemo(() => languagesQuery.data?.languages ?? [], [languagesQuery.data]);
@@ -72,10 +86,8 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header - Fixed Top, Full Width, Z-Index High */}
-      <TopNav activeTab={activeTab} sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+      <TopNav activeTab={activeTab} sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} />
 
-      {/* Mobile Overlay */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 md:hidden",
@@ -84,12 +96,9 @@ export function AppShell({
         onClick={() => setSidebarOpen(false)}
       />
 
-      {/* Sidebar - Fixed Left, starts below header */}
       <div
         className={cn(
           "fixed bottom-0 left-0 top-[var(--topnav-height)] z-40 w-[var(--sidebar-width)] transition-transform duration-300",
-          // Mobile: Slide in/out
-          // Desktop: Slide in/out or Hide
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -98,16 +107,17 @@ export function AppShell({
           languages={languages}
           labels={DEFAULT_LABELS}
           repos={repos}
+          isLoadingLanguages={languagesQuery.isLoading}
+          isLoadingRepos={reposQuery.isLoading}
           value={filterState}
           onChange={updateFilters}
+          onOpenRepoSection={() => setRepoDataEnabled(true)}
         />
       </div>
 
-      {/* Main Content - Padded Top for Header, Margin Left for Sidebar */}
       <main
         className={cn(
           "min-h-screen pt-[var(--topnav-height)] transition-[margin-left] duration-300",
-          // Desktop margin depends on sidebar state
           sidebarOpen ? "md:ml-[var(--sidebar-width)]" : "md:ml-0"
         )}
       >
