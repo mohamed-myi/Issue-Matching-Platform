@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { useMe } from "@/lib/api/hooks";
+import type { AuthMeResponse } from "@/lib/api/types";
 
 function is401(err: unknown): boolean {
   return axios.isAxiosError(err) && err.response?.status === 401;
@@ -14,9 +15,9 @@ function is401(err: unknown): boolean {
  *
  * Use this on every page that requires an authenticated session.
  */
-export function useAuthGuard() {
+export function useAuthGuard(initialMe?: AuthMeResponse | null) {
   const router = useRouter();
-  const meQuery = useMe();
+  const meQuery = useMe(initialMe);
 
   useEffect(() => {
     if (meQuery.isError && is401(meQuery.error)) {

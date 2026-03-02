@@ -32,6 +32,29 @@ import type {
   TrendingResponse,
 } from "./types";
 
+type FeedFilters = {
+  languages?: string[];
+  labels?: string[];
+  repos?: string[];
+};
+
+function buildFeedFilterParams(
+  page: number,
+  pageSize: number,
+  filters?: FeedFilters,
+): Record<string, number | string[]> {
+  const params: Record<string, number | string[]> = {
+    page,
+    page_size: pageSize,
+  };
+
+  if (filters?.languages?.length) params.languages = filters.languages;
+  if (filters?.labels?.length) params.labels = filters.labels;
+  if (filters?.repos?.length) params.repos = filters.repos;
+
+  return params;
+}
+
 export async function fetchPublicStats() {
   const { data } = await api.get<PublicStatsResponse>("/stats");
   return data;
@@ -40,28 +63,22 @@ export async function fetchPublicStats() {
 export async function fetchTrending(
   page = 1,
   pageSize = 20,
-  filters?: { languages?: string[]; labels?: string[]; repos?: string[] }
+  filters?: FeedFilters
 ) {
-  const params: Record<string, any> = { page, page_size: pageSize };
-  if (filters?.languages?.length) params.languages = filters.languages;
-  if (filters?.labels?.length) params.labels = filters.labels;
-  if (filters?.repos?.length) params.repos = filters.repos;
-
-  const { data } = await api.get<TrendingResponse>("/feed/trending", { params });
+  const { data } = await api.get<TrendingResponse>("/feed/trending", {
+    params: buildFeedFilterParams(page, pageSize, filters),
+  });
   return data;
 }
 
 export async function fetchFeed(
   page = 1,
   pageSize = 20,
-  filters?: { languages?: string[]; labels?: string[]; repos?: string[] }
+  filters?: FeedFilters
 ) {
-  const params: Record<string, any> = { page, page_size: pageSize };
-  if (filters?.languages?.length) params.languages = filters.languages;
-  if (filters?.labels?.length) params.labels = filters.labels;
-  if (filters?.repos?.length) params.repos = filters.repos;
-
-  const { data } = await api.get<FeedResponse>("/feed", { params });
+  const { data } = await api.get<FeedResponse>("/feed", {
+    params: buildFeedFilterParams(page, pageSize, filters),
+  });
   return data;
 }
 

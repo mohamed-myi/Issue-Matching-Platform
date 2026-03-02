@@ -1,4 +1,5 @@
 import axios, { AxiosError } from "axios";
+import { ensureMockApiReady } from "@/lib/mocks/runtime";
 import { getApiBaseUrl } from "./base-url";
 import type { ApiErrorPayload } from "./types";
 
@@ -9,6 +10,11 @@ export const api = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+});
+
+api.interceptors.request.use(async (config) => {
+  await ensureMockApiReady();
+  return config;
 });
 
 export function getApiErrorMessage(error: unknown): string {
@@ -29,4 +35,3 @@ export function getApiErrorMessage(error: unknown): string {
 
   return "Unknown error";
 }
-
