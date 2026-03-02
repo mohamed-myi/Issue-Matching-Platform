@@ -8,6 +8,7 @@ Logout Integration Tests
 
 These tests verify logout and logout_all correctly delete sessions.
 """
+
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -16,21 +17,18 @@ from dotenv import dotenv_values
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
-# Load DATABASE_URL from .env files directly
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.parent
 env_local = dotenv_values(PROJECT_ROOT / ".env.local")
 env_base = dotenv_values(PROJECT_ROOT / ".env")
 REAL_DATABASE_URL = env_local.get("DATABASE_URL") or env_base.get("DATABASE_URL") or ""
 
-# Hardcoded test user UUIDs
 TEST_USER_UUID = UUID("00000000-0000-0000-0000-000000000003")
 TEST_USER_UUID_2 = UUID("00000000-0000-0000-0000-000000000004")
 
-# Skip if no real database URL
 pytestmark = [
     pytest.mark.skipif(
         not REAL_DATABASE_URL or "localhost" in REAL_DATABASE_URL or "127.0.0.1" in REAL_DATABASE_URL,
-        reason="Real DATABASE_URL not set or points to localhost - skipping production DB tests"
+        reason="Real DATABASE_URL not set or points to localhost - skipping production DB tests",
     ),
 ]
 
@@ -86,7 +84,7 @@ async def create_test_user(conn: AsyncConnection, user_id: UUID, email: str) -> 
             "email": email,
             "github_node_id": f"test_node_{str(user_id)}",
             "github_username": f"test_user_{str(user_id)[:8]}",
-        }
+        },
     )
 
 
@@ -106,7 +104,7 @@ async def create_test_session(conn: AsyncConnection, user_id: UUID, jti: str) ->
             "session_id": str(session_id),
             "user_id": str(user_id),
             "jti": jti,
-        }
+        },
     )
 
     return session_id
@@ -120,7 +118,7 @@ async def count_user_sessions(conn: AsyncConnection, user_id: UUID) -> int:
             WHERE user_id = :user_id
             AND expires_at > NOW()
         """),
-        {"user_id": str(user_id)}
+        {"user_id": str(user_id)},
     )
     return result.scalar() or 0
 
@@ -132,7 +130,7 @@ async def session_exists(conn: AsyncConnection, session_id: UUID) -> bool:
             SELECT COUNT(*) FROM public.session
             WHERE id = :session_id
         """),
-        {"session_id": str(session_id)}
+        {"session_id": str(session_id)},
     )
     return (result.scalar() or 0) > 0
 
@@ -147,7 +145,7 @@ async def delete_single_session(conn: AsyncConnection, session_id: UUID) -> int:
             DELETE FROM public.session
             WHERE id = :session_id
         """),
-        {"session_id": str(session_id)}
+        {"session_id": str(session_id)},
     )
     return result.rowcount
 
@@ -164,7 +162,7 @@ async def delete_all_user_sessions(conn: AsyncConnection, user_id: UUID, except_
                 WHERE user_id = :user_id
                 AND id != :except_id
             """),
-            {"user_id": str(user_id), "except_id": str(except_id)}
+            {"user_id": str(user_id), "except_id": str(except_id)},
         )
     else:
         result = await conn.execute(
@@ -172,7 +170,7 @@ async def delete_all_user_sessions(conn: AsyncConnection, user_id: UUID, except_
                 DELETE FROM public.session
                 WHERE user_id = :user_id
             """),
-            {"user_id": str(user_id)}
+            {"user_id": str(user_id)},
         )
     return result.rowcount
 
@@ -270,11 +268,7 @@ class TestLogoutAllSessions:
         other_2 = await create_test_session(transactional_connection, TEST_USER_UUID, "jti_other_2")
 
         # Logout all except current
-        deleted = await delete_all_user_sessions(
-            transactional_connection,
-            TEST_USER_UUID,
-            except_id=current_session
-        )
+        deleted = await delete_all_user_sessions(transactional_connection, TEST_USER_UUID, except_id=current_session)
 
         assert deleted == 2, f"Should have deleted 2 sessions, got {deleted}"
 
@@ -312,8 +306,9 @@ class TestLogoutAllSessions:
 
         # User B's sessions must be unchanged
         user_b_count_after = await count_user_sessions(transactional_connection, TEST_USER_UUID_2)
-        assert user_b_count_after == 3, \
+        assert user_b_count_after == 3, (
             f"User B's sessions must be unaffected! Had {user_b_count_before}, now {user_b_count_after}"
+        )
 
     @pytest.mark.asyncio
     async def test_logout_all_returns_correct_count(self, transactional_connection):

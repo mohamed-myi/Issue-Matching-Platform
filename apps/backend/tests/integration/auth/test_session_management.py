@@ -62,5 +62,3 @@ class TestSessionEndpointRouting:
         response = client.post("/auth/sessions")
 
         assert response.status_code == 405
-
-

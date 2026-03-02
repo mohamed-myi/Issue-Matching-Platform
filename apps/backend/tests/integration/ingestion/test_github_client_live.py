@@ -11,14 +11,10 @@ from gim_backend.ingestion.github_client import (
 )
 from gim_backend.ingestion.rate_limiter import InMemoryCostLimiter
 
-pytestmark = pytest.mark.skipif(
-    not os.getenv("GIT_TOKEN"),
-    reason="GIT_TOKEN environment variable not set"
-)
+pytestmark = pytest.mark.skipif(not os.getenv("GIT_TOKEN"), reason="GIT_TOKEN environment variable not set")
 
 
 class TestLiveGitHubAuthentication:
-
     @pytest.fixture
     def token(self):
         return os.getenv("GIT_TOKEN")
@@ -40,7 +36,6 @@ class TestLiveGitHubAuthentication:
 
 
 class TestLiveCostTracking:
-
     @pytest.fixture
     def token(self):
         return os.getenv("GIT_TOKEN")
@@ -88,9 +83,7 @@ class TestLiveCostTracking:
 
             assert cost_info is not None
 
-            assert cost_info.node_count > 10, (
-                f"Expected nested query to visit many nodes, got {cost_info.node_count}"
-            )
+            assert cost_info.node_count > 10, f"Expected nested query to visit many nodes, got {cost_info.node_count}"
 
             assert cost_info.cost >= 1
 
@@ -119,7 +112,6 @@ class TestLiveCostTracking:
 
 
 class TestLiveCostLimiterIntegration:
-
     @pytest.fixture
     def token(self):
         return os.getenv("GIT_TOKEN")
@@ -134,10 +126,7 @@ class TestLiveCostLimiterIntegration:
             """
             _, cost_info = await client.execute_query_with_cost(query)
 
-            await limiter.set_remaining_from_response(
-                remaining=cost_info.remaining,
-                reset_at=cost_info.reset_at
-            )
+            await limiter.set_remaining_from_response(remaining=cost_info.remaining, reset_at=cost_info.reset_at)
 
             assert await limiter.get_remaining_points() == cost_info.remaining
 
@@ -157,7 +146,6 @@ class TestLiveCostLimiterIntegration:
 
 
 class TestLiveRateLimitInfo:
-
     @pytest.fixture
     def token(self):
         return os.getenv("GIT_TOKEN")

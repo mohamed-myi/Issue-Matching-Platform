@@ -2,20 +2,12 @@
 Integration tests for taxonomy API routes.
 Tests /taxonomy/languages and /taxonomy/stack-areas without authentication.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 from gim_shared.constants import PROFILE_LANGUAGES, STACK_AREAS
 
 from gim_backend.main import app
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture

@@ -7,16 +7,6 @@ from fastapi.testclient import TestClient
 from gim_backend.api.routes.auth import STATE_COOKIE_NAME
 from gim_backend.core.oauth import OAuthToken, UserProfile
 from gim_backend.main import app
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    """Reset rate limiter before each test to prevent 429 errors."""
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture
@@ -65,6 +55,7 @@ class TestLoginEndpoint:
         location = response.headers["location"]
         # Extract state param from URL
         import urllib.parse
+
         parsed = urllib.parse.urlparse(location)
         params = urllib.parse.parse_qs(parsed.query)
         state = params["state"][0]
@@ -79,6 +70,7 @@ class TestLoginEndpoint:
 
         location = response.headers["location"]
         import urllib.parse
+
         parsed = urllib.parse.urlparse(location)
         params = urllib.parse.parse_qs(parsed.query)
         state = params["state"][0]
@@ -97,9 +89,6 @@ class TestLoginEndpoint:
 
 class TestCallbackEndpoint:
     """Tests for GET /auth/callback/{provider}"""
-
-
-
 
     def test_callback_rejects_missing_state(self, client):
         """Verify redirect with csrf_failed when state missing."""
@@ -160,13 +149,14 @@ class TestCallbackSuccessFlow:
     @pytest.fixture
     def mock_oauth_flow(self):
         """Mock all OAuth dependencies for success flow."""
-        with patch("gim_backend.api.routes.auth.exchange_code_for_token") as mock_exchange, \
-             patch("gim_backend.api.routes.auth.fetch_user_profile") as mock_profile, \
-             patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert, \
-             patch("gim_backend.api.routes.auth.create_session") as mock_session, \
-             patch("gim_backend.api.routes.auth.get_db") as mock_db, \
-             patch("gim_backend.api.routes.auth.get_http_client") as mock_client:
-
+        with (
+            patch("gim_backend.api.routes.auth.exchange_code_for_token") as mock_exchange,
+            patch("gim_backend.api.routes.auth.fetch_user_profile") as mock_profile,
+            patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert,
+            patch("gim_backend.api.routes.auth.create_session") as mock_session,
+            patch("gim_backend.api.routes.auth.get_db") as mock_db,
+            patch("gim_backend.api.routes.auth.get_http_client") as mock_client,
+        ):
             # Configure mock returns
             mock_exchange.return_value = OAuthToken(
                 access_token="test_token",
@@ -187,12 +177,14 @@ class TestCallbackSuccessFlow:
             mock_session_obj = MagicMock()
             mock_session_obj.id = "00000000-0000-0000-0000-000000000002"
             from datetime import datetime, timedelta
+
             mock_expires = datetime.now(UTC) + timedelta(days=7)
             mock_session.return_value = (mock_session_obj, mock_expires)
 
             # Mock async generators
             async def mock_db_gen():
                 yield MagicMock()
+
             async def mock_client_gen():
                 yield MagicMock()
 
@@ -213,10 +205,7 @@ class TestCallbackSuccessFlow:
 
         client.cookies.set(STATE_COOKIE_NAME, token)
 
-        response = client.get(
-            "/auth/callback/github",
-            params={"code": "valid_code", "state": state}
-        )
+        response = client.get("/auth/callback/github", params={"code": "valid_code", "state": state})
 
         # Should redirect to dashboard (not reject with 400 for missing fingerprint)
         assert response.status_code == 302
@@ -261,6 +250,7 @@ class TestCallbackSuccessFlow:
 
         # Verify session_id is a valid UUID format
         from uuid import UUID
+
         session_value = response.cookies.get("session_id")
         UUID(session_value)
 
@@ -279,5 +269,85 @@ class TestCallbackSuccessFlow:
 
         # State cookie should be deleted (empty or max-age=0)
         state_cookie = response.cookies.get(STATE_COOKIE_NAME)
-        assert state_cookie == "" or state_cookie is None, \
+        assert state_cookie == "" or state_cookie is None, (
             "State cookie must be cleared after callback to prevent replay"
+        )
+
+    def test_callback_redirects_on_oauth_provider_failure(self, client):
+        from gim_backend.core.oauth import OAuthError
+
+        token = "validtoken1234567890123456789012"
+        state = f"login:{token}:0"
+        client.cookies.set(STATE_COOKIE_NAME, token)
+
+        with patch("gim_backend.api.routes.auth.exchange_code_for_token") as mock_exchange:
+            mock_exchange.side_effect = OAuthError("provider temporarily unavailable")
+
+            response = client.get(
+                "/auth/callback/github",
+                params={"code": "valid_code", "state": state},
+                headers={"X-Device-Fingerprint": "test_fingerprint"},
+            )
+
+        assert response.status_code == 302
+        assert "error=oauth_unavailable" in response.headers["location"]
+
+    def test_link_callback_redirects_on_oauth_provider_failure(self, client):
+        from gim_backend.core.oauth import OAuthError
+
+        token = "validtoken1234567890123456789012"
+        state = f"link:{token}"
+        client.cookies.set(STATE_COOKIE_NAME, token)
+
+        mock_session = MagicMock()
+        mock_user = MagicMock()
+        mock_user.id = "00000000-0000-0000-0000-000000000001"
+
+        with (
+            patch(
+                "gim_backend.api.routes.auth.require_authenticated_user_session",
+                return_value=(mock_user, mock_session),
+            ),
+            patch("gim_backend.api.routes.auth.exchange_code_for_token") as mock_exchange,
+        ):
+            mock_exchange.side_effect = OAuthError("provider temporarily unavailable")
+
+            response = client.get(
+                "/auth/callback/github",
+                params={"code": "valid_code", "state": state},
+            )
+
+        assert response.status_code == 302
+        location = response.headers["location"]
+        assert "/settings/accounts" in location
+        assert "error=oauth_unavailable" in location
+
+    def test_connect_callback_redirects_on_oauth_provider_failure(self, client):
+        from gim_backend.core.oauth import OAuthError
+
+        token = "validtoken1234567890123456789012"
+        state = f"connect:{token}"
+        client.cookies.set(STATE_COOKIE_NAME, token)
+
+        mock_session = MagicMock()
+        mock_user = MagicMock()
+        mock_user.id = "00000000-0000-0000-0000-000000000001"
+
+        with (
+            patch(
+                "gim_backend.api.routes.auth.require_authenticated_user_session",
+                return_value=(mock_user, mock_session),
+            ),
+            patch("gim_backend.api.routes.auth.exchange_code_for_token") as mock_exchange,
+        ):
+            mock_exchange.side_effect = OAuthError("provider temporarily unavailable")
+
+            response = client.get(
+                "/auth/callback/github",
+                params={"code": "valid_code", "state": state},
+            )
+
+        assert response.status_code == 302
+        location = response.headers["location"]
+        assert "/profile/onboarding" in location
+        assert "error=oauth_unavailable" in location

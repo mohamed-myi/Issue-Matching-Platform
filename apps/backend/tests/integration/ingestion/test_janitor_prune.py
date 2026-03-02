@@ -7,8 +7,10 @@ import pytest
 
 # Skip all tests if DATABASE_URL not configured or not accessible
 pytestmark = pytest.mark.skipif(
-    not os.getenv("DATABASE_URL") or "localhost" in (os.getenv("DATABASE_URL") or "") or "127.0.0.1" in (os.getenv("DATABASE_URL") or ""),
-    reason="DATABASE_URL not set or points to localhost - skipping real DB tests"
+    not os.getenv("DATABASE_URL")
+    or "localhost" in (os.getenv("DATABASE_URL") or "")
+    or "127.0.0.1" in (os.getenv("DATABASE_URL") or ""),
+    reason="DATABASE_URL not set or points to localhost - skipping real DB tests",
 )
 
 
@@ -69,12 +71,10 @@ async def clean_issues_table(db_session):
             await db_session.rollback()
             pytest.skip("ingestion.issue table does not exist - run migrations first")
 
-    # Clear before test
     await safe_delete()
 
     yield
 
-    # Clear after test
     try:
         await db_session.exec(text("DELETE FROM ingestion.issue"))
         await db_session.commit()
@@ -95,13 +95,13 @@ async def test_repository(db_session):
             VALUES (:node_id, :full_name, :language)
             ON CONFLICT (node_id) DO NOTHING
         """),
-        params={"node_id": repo_id, "full_name": "test/janitor-repo", "language": "Python"}
+        params={"node_id": repo_id, "full_name": "test/janitor-repo", "language": "Python"},
     )
     await db_session.commit()
 
     yield repo_id
 
-    # Cleanup handled by clean_issues_table (cascade or separate)
+
 
 
 async def insert_test_issues(session, repo_id: str, count: int, survival_scores: list[float]):
@@ -127,17 +127,15 @@ async def insert_test_issues(session, repo_id: str, count: int, survival_scores:
                 "survival": score,
                 "q_score": 0.7,
                 "created": datetime.now(UTC) - timedelta(days=i),
-                "embedding": str([0.1] * 768),
-            }
+                "embedding": str([0.1] * 256),
+            },
         )
     await session.commit()
 
 
 class TestJanitorIntegration:
     @pytest.mark.asyncio
-    async def test_prunes_bottom_20_percent(
-        self, db_session, clean_issues_table, test_repository
-    ):
+    async def test_prunes_bottom_20_percent(self, db_session, clean_issues_table, test_repository):
         """Insert 100 issues, verify ~20 are deleted"""
         from gim_backend.ingestion.janitor import Janitor
 
@@ -153,9 +151,7 @@ class TestJanitorIntegration:
         assert result["remaining_count"] == 80
 
     @pytest.mark.asyncio
-    async def test_deletes_lowest_survival_scores(
-        self, db_session, clean_issues_table, test_repository
-    ):
+    async def test_deletes_lowest_survival_scores(self, db_session, clean_issues_table, test_repository):
         """Verify the deleted issues are the ones with lowest scores"""
         from sqlalchemy import text
 
@@ -169,9 +165,7 @@ class TestJanitorIntegration:
         await janitor.execute_pruning()
 
         # Check remaining issues have survival_score >= 0.2 (P20 of 0.1-1.0)
-        result = await db_session.exec(
-            text("SELECT MIN(survival_score) as min_score FROM ingestion.issue")
-        )
+        result = await db_session.exec(text("SELECT MIN(survival_score) as min_score FROM ingestion.issue"))
         row = result.first()
 
         # The 20th percentile of [0.1, 0.2, ..., 1.0] is approximately 0.28
@@ -179,9 +173,7 @@ class TestJanitorIntegration:
         assert row.min_score >= 0.2
 
     @pytest.mark.asyncio
-    async def test_handles_empty_table(
-        self, db_session, clean_issues_table, test_repository
-    ):
+    async def test_handles_empty_table(self, db_session, clean_issues_table, test_repository):
         """Empty table should return zeros without error"""
         from gim_backend.ingestion.janitor import Janitor
 
@@ -192,9 +184,7 @@ class TestJanitorIntegration:
         assert result["remaining_count"] == 0
 
     @pytest.mark.asyncio
-    async def test_handles_small_table(
-        self, db_session, clean_issues_table, test_repository
-    ):
+    async def test_handles_small_table(self, db_session, clean_issues_table, test_repository):
         """Tables with few rows should handle percentile calculation"""
         from gim_backend.ingestion.janitor import Janitor
 
@@ -212,9 +202,7 @@ class TestJanitorIntegration:
 
 class TestIndexUtilization:
     @pytest.mark.asyncio
-    async def test_uses_survival_score_index(
-        self, db_session, clean_issues_table, test_repository
-    ):
+    async def test_uses_survival_score_index(self, db_session, clean_issues_table, test_repository):
         """Verify the query uses ix_issue_survival_vacuum index"""
         from sqlalchemy import text
 
@@ -242,4 +230,3 @@ class TestIndexUtilization:
 
         # For small tables, Postgres may choose seq scan;
         # this test mainly verifies query executes without error
-

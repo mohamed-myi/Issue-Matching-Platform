@@ -2,55 +2,17 @@
 End-to-end integration tests for Profile Engine Phase 6.
 Tests full onboarding flow, feed personalization, and error handling.
 """
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-
-from gim_backend.main import app
-from gim_backend.middleware.auth import require_auth
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = uuid4()
-    user.email = "e2e@example.com"
-    return user
-
-
-@pytest.fixture
-def mock_session(mock_user):
-    session = MagicMock()
-    session.id = uuid4()
-    session.user_id = mock_user.id
-    return session
-
-
-@pytest.fixture
-def authenticated_client(client, mock_user, mock_session):
-    def mock_require_auth():
-        return (mock_user, mock_session)
-
-    app.dependency_overrides[require_auth] = mock_require_auth
-    yield client
-    app.dependency_overrides.clear()
+def mock_user_email() -> str:
+    return "e2e@example.com"
 
 
 def create_mock_profile(
@@ -92,7 +54,7 @@ def create_mock_profile(
     return profile
 
 
-SAMPLE_VECTOR = [0.01] * 768
+SAMPLE_VECTOR = [0.01] * 256
 
 
 class TestFeedAuthRequired:
@@ -107,9 +69,7 @@ class TestFeedTrendingFallback:
     """Tests trending feed fallback when user has no profile."""
 
     @patch("gim_backend.services.feed_service.get_or_create_profile")
-    def test_returns_trending_when_no_combined_vector(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_returns_trending_when_no_combined_vector(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(mock_user.id)
         mock_get_profile.return_value = mock_profile
 
@@ -135,9 +95,7 @@ class TestFeedTrendingFallback:
         assert "trending" in data["profile_cta"].lower()
 
     @patch("gim_backend.services.feed_service.get_or_create_profile")
-    def test_trending_feed_shows_cta_message(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_trending_feed_shows_cta_message(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(mock_user.id)
         mock_get_profile.return_value = mock_profile
 
@@ -164,9 +122,7 @@ class TestFeedPersonalized:
     """Tests personalized feed when user has combined_vector."""
 
     @patch("gim_backend.services.feed_service.get_or_create_profile")
-    def test_returns_personalized_when_has_combined_vector(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_returns_personalized_when_has_combined_vector(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(
             mock_user.id,
             intent_text="I want to contribute",
@@ -197,9 +153,7 @@ class TestFeedPersonalized:
         assert data["profile_cta"] is None
 
     @patch("gim_backend.services.feed_service.get_or_create_profile")
-    def test_personalized_feed_no_cta(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_personalized_feed_no_cta(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(
             mock_user.id,
             intent_text="I want to contribute",
@@ -231,9 +185,7 @@ class TestFeedPagination:
     """Tests feed pagination parameters."""
 
     @patch("gim_backend.services.feed_service.get_or_create_profile")
-    def test_accepts_page_parameter(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_accepts_page_parameter(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(mock_user.id)
         mock_get_profile.return_value = mock_profile
 
@@ -257,9 +209,7 @@ class TestFeedPagination:
         assert data["page"] == 2
 
     @patch("gim_backend.services.feed_service.get_or_create_profile")
-    def test_accepts_page_size_parameter(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_accepts_page_size_parameter(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(mock_user.id)
         mock_get_profile.return_value = mock_profile
 
@@ -320,9 +270,7 @@ class TestRetryLogic:
 
         with patch("gim_backend.services.profile_embedding_service.embed_query", mock_embed):
             with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = await generate_intent_vector_with_retry(
-                    ["backend"], "Test text", max_retries=3
-                )
+                result = await generate_intent_vector_with_retry(["backend"], "Test text", max_retries=3)
 
         assert call_count == 3
         assert result is not None
@@ -336,9 +284,7 @@ class TestRetryLogic:
 
         with patch("gim_backend.services.profile_embedding_service.embed_query", always_fail):
             with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = await generate_intent_vector_with_retry(
-                    ["backend"], "Test text", max_retries=3
-                )
+                result = await generate_intent_vector_with_retry(["backend"], "Test text", max_retries=3)
 
         assert result is None
 
@@ -385,7 +331,7 @@ class TestCombinedVectorCalculation:
     async def test_intent_only_combined_equals_intent(self):
         from gim_backend.services.profile_embedding_service import calculate_combined_vector
 
-        intent_vector = [1.0] * 768
+        intent_vector = [1.0] * 256
 
         result = await calculate_combined_vector(
             intent_vector=intent_vector,
@@ -458,4 +404,3 @@ class TestProfileDeletionCancelsJobs:
         assert len(client.get_mock_tasks()) == 0
 
         reset_client_for_testing()
-

@@ -1,4 +1,5 @@
 """Integration tests for repository routes."""
+
 from unittest.mock import AsyncMock, patch
 
 import pytest

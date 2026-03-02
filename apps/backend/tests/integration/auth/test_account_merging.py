@@ -8,16 +8,6 @@ from fastapi.testclient import TestClient
 from gim_backend.api.routes.auth import STATE_COOKIE_NAME
 from gim_backend.core.oauth import OAuthProvider, OAuthToken, UserProfile
 from gim_backend.main import app
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    """Reset rate limiter before each test to prevent 429 errors."""
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture
@@ -31,11 +21,12 @@ class TestAccountMergingBehavior:
     @pytest.fixture
     def mock_oauth_success(self):
         """Base OAuth mock returning verified user profile"""
-        with patch("gim_backend.api.routes.auth.exchange_code_for_token") as mock_exchange, \
-             patch("gim_backend.api.routes.auth.fetch_user_profile") as mock_profile, \
-             patch("gim_backend.api.routes.auth.get_db") as mock_db, \
-             patch("gim_backend.api.routes.auth.get_http_client") as mock_client:
-
+        with (
+            patch("gim_backend.api.routes.auth.exchange_code_for_token") as mock_exchange,
+            patch("gim_backend.api.routes.auth.fetch_user_profile") as mock_profile,
+            patch("gim_backend.api.routes.auth.get_db") as mock_db,
+            patch("gim_backend.api.routes.auth.get_http_client") as mock_client,
+        ):
             mock_exchange.return_value = OAuthToken(
                 access_token="test_token",
                 token_type="bearer",
@@ -43,6 +34,7 @@ class TestAccountMergingBehavior:
 
             async def mock_db_gen():
                 yield MagicMock()
+
             async def mock_client_gen():
                 yield MagicMock()
 
@@ -70,20 +62,19 @@ class TestAccountMergingBehavior:
             username="returninguser",
         )
 
-        with patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert, \
-             patch("gim_backend.api.routes.auth.create_session") as mock_session:
-
+        with (
+            patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert,
+            patch("gim_backend.api.routes.auth.create_session") as mock_session,
+        ):
             mock_user = MagicMock()
             mock_user.id = user_id
             mock_upsert.return_value = mock_user
 
             from datetime import datetime, timedelta
+
             mock_session_obj = MagicMock()
             mock_session_obj.id = uuid4()
-            mock_session.return_value = (
-                mock_session_obj,
-                datetime.now(UTC) + timedelta(days=7)
-            )
+            mock_session.return_value = (mock_session_obj, datetime.now(UTC) + timedelta(days=7))
 
             token = "validstate123456789012345678901234"
             state = f"login:{token}:0"
@@ -129,9 +120,10 @@ class TestAccountMergingBehavior:
             username=None,
         )
 
-        with patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert, \
-             patch("gim_backend.api.routes.auth.create_session"):
-
+        with (
+            patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert,
+            patch("gim_backend.api.routes.auth.create_session"),
+        ):
             mock_upsert.side_effect = ExistingAccountError("github")
 
             token = "validstate123456789012345678901234"

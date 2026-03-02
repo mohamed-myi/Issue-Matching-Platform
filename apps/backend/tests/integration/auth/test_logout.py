@@ -1,4 +1,3 @@
-
 from fastapi.testclient import TestClient
 
 from gim_backend.main import app

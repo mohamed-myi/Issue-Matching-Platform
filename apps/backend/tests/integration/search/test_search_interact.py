@@ -7,15 +7,6 @@ from fastapi.testclient import TestClient
 
 from gim_backend.api.dependencies import get_db
 from gim_backend.main import app
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture
@@ -36,6 +27,7 @@ def mock_db():
 def db_override(mock_db):
     async def _override():
         yield mock_db
+
     app.dependency_overrides[get_db] = _override
     yield
     app.dependency_overrides.clear()
@@ -50,14 +42,18 @@ class TestSearchInteract:
             "result_count": 100,
             "page": 2,
             "page_size": 20,
+            "page_node_ids": [f"issue_{i}" for i in range(21, 41)],
         }
 
         with patch("gim_backend.api.routes.search.get_cached_search_context", new=AsyncMock(return_value=context)):
-            response = client.post("/search/interact", json={
-                "search_id": str(search_id),
-                "selected_node_id": "issue_1",
-                "position": 25,
-            })
+            response = client.post(
+                "/search/interact",
+                json={
+                    "search_id": str(search_id),
+                    "selected_node_id": "issue_25",
+                    "position": 25,
+                },
+            )
 
         assert response.status_code == 204
         assert mock_db.execute.await_count == 1
@@ -66,7 +62,7 @@ class TestSearchInteract:
         assert params["search_id"] == search_id
         assert params["query_text"] == "python error"
         assert params["result_count"] == 100
-        assert params["selected_node_id"] == "issue_1"
+        assert params["selected_node_id"] == "issue_25"
         assert params["position"] == 25
 
         filters = json.loads(params["filters_json"])
@@ -76,11 +72,14 @@ class TestSearchInteract:
         search_id = uuid4()
 
         with patch("gim_backend.api.routes.search.get_cached_search_context", new=AsyncMock(return_value=None)):
-            response = client.post("/search/interact", json={
-                "search_id": str(search_id),
-                "selected_node_id": "issue_1",
-                "position": 1,
-            })
+            response = client.post(
+                "/search/interact",
+                json={
+                    "search_id": str(search_id),
+                    "selected_node_id": "issue_1",
+                    "position": 1,
+                },
+            )
 
         assert response.status_code == 404
 
@@ -92,14 +91,41 @@ class TestSearchInteract:
             "result_count": 30,
             "page": 1,
             "page_size": 20,
+            "page_node_ids": [f"issue_{i}" for i in range(1, 21)],
         }
 
         with patch("gim_backend.api.routes.search.get_cached_search_context", new=AsyncMock(return_value=context)):
-            response = client.post("/search/interact", json={
-                "search_id": str(search_id),
-                "selected_node_id": "issue_1",
-                "position": 25,
-            })
+            response = client.post(
+                "/search/interact",
+                json={
+                    "search_id": str(search_id),
+                    "selected_node_id": "issue_1",
+                    "position": 25,
+                },
+            )
+
+        assert response.status_code == 400
+
+    def test_interact_rejects_selected_node_id_mismatch_for_position(self, client, db_override):
+        search_id = uuid4()
+        context = {
+            "query_text": "python",
+            "filters_json": {"languages": [], "labels": [], "repos": []},
+            "result_count": 20,
+            "page": 1,
+            "page_size": 20,
+            "page_node_ids": [f"issue_{i}" for i in range(1, 21)],
+        }
+
+        with patch("gim_backend.api.routes.search.get_cached_search_context", new=AsyncMock(return_value=context)):
+            response = client.post(
+                "/search/interact",
+                json={
+                    "search_id": str(search_id),
+                    "selected_node_id": "issue_999",
+                    "position": 5,
+                },
+            )
 
         assert response.status_code == 400
 
@@ -111,18 +137,20 @@ class TestSearchInteract:
             "result_count": 10,
             "page": 1,
             "page_size": 20,
+            "page_node_ids": [f"issue_{i}" for i in range(1, 11)],
         }
 
         mock_db.execute = AsyncMock(side_effect=Exception("db down"))
 
         with patch("gim_backend.api.routes.search.get_cached_search_context", new=AsyncMock(return_value=context)):
-            response = client.post("/search/interact", json={
-                "search_id": str(search_id),
-                "selected_node_id": "issue_1",
-                "position": 1,
-            })
+            response = client.post(
+                "/search/interact",
+                json={
+                    "search_id": str(search_id),
+                    "selected_node_id": "issue_1",
+                    "position": 1,
+                },
+            )
 
         assert response.status_code == 204
         assert mock_db.rollback.await_count == 1
-
-

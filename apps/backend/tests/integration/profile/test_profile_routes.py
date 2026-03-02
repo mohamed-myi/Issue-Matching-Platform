@@ -1,70 +1,38 @@
 """Integration tests for profile API routes."""
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-
-from gim_backend.main import app
-from gim_backend.middleware.auth import require_auth
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = uuid4()
-    user.email = "test@example.com"
-    return user
-
-
-@pytest.fixture
-def mock_session(mock_user):
-    session = MagicMock()
-    session.id = uuid4()
-    session.user_id = mock_user.id
-    return session
-
-
-@pytest.fixture
-def authenticated_client(client, mock_user, mock_session):
-    def mock_require_auth():
-        return (mock_user, mock_session)
-
-    app.dependency_overrides[require_auth] = mock_require_auth
-    yield client
-    app.dependency_overrides.clear()
 
 
 class TestAuthRequired:
     """Verifies authentication middleware is applied to all routes."""
 
-    @pytest.mark.parametrize("method,path,body", [
-        ("get", "/profile", None),
-        ("delete", "/profile", None),
-        ("post", "/profile/intent", {"languages": ["Python"], "stack_areas": ["backend"], "text": "Some intent text"}),
-        ("put", "/profile/intent", {"languages": ["Python"], "stack_areas": ["backend"], "text": "Some intent text"}),
-        ("get", "/profile/intent", None),
-        ("patch", "/profile/intent", {"text": "Updated text"}),
-        ("delete", "/profile/intent", None),
-        ("get", "/profile/processing-status", None),
-        ("get", "/profile/preferences", None),
-        ("patch", "/profile/preferences", {"min_heat_threshold": 0.7}),
-    ])
+    @pytest.mark.parametrize(
+        "method,path,body",
+        [
+            ("get", "/profile", None),
+            ("delete", "/profile", None),
+            (
+                "post",
+                "/profile/intent",
+                {"languages": ["Python"], "stack_areas": ["backend"], "text": "Some intent text"},
+            ),
+            (
+                "put",
+                "/profile/intent",
+                {"languages": ["Python"], "stack_areas": ["backend"], "text": "Some intent text"},
+            ),
+            ("get", "/profile/intent", None),
+            ("patch", "/profile/intent", {"text": "Updated text"}),
+            ("delete", "/profile/intent", None),
+            ("get", "/profile/processing-status", None),
+            ("get", "/profile/preferences", None),
+            ("patch", "/profile/preferences", {"min_heat_threshold": 0.7}),
+        ],
+    )
     def test_returns_401_without_auth(self, client, method, path, body):
         if body:
             response = getattr(client, method)(path, json=body)
@@ -77,35 +45,47 @@ class TestIntentValidation:
     """Tests input validation rules for intent endpoints."""
 
     def test_rejects_text_under_min_length(self, authenticated_client):
-        response = authenticated_client.post("/profile/intent", json={
-            "languages": ["Python"],
-            "stack_areas": ["backend"],
-            "text": "Short",
-        })
+        response = authenticated_client.post(
+            "/profile/intent",
+            json={
+                "languages": ["Python"],
+                "stack_areas": ["backend"],
+                "text": "Short",
+            },
+        )
         assert response.status_code == 422
 
     def test_rejects_text_over_max_length(self, authenticated_client):
-        response = authenticated_client.post("/profile/intent", json={
-            "languages": ["Python"],
-            "stack_areas": ["backend"],
-            "text": "x" * 2001,
-        })
+        response = authenticated_client.post(
+            "/profile/intent",
+            json={
+                "languages": ["Python"],
+                "stack_areas": ["backend"],
+                "text": "x" * 2001,
+            },
+        )
         assert response.status_code == 422
 
     def test_rejects_empty_languages_list(self, authenticated_client):
-        response = authenticated_client.post("/profile/intent", json={
-            "languages": [],
-            "stack_areas": ["backend"],
-            "text": "Some valid intent text",
-        })
+        response = authenticated_client.post(
+            "/profile/intent",
+            json={
+                "languages": [],
+                "stack_areas": ["backend"],
+                "text": "Some valid intent text",
+            },
+        )
         assert response.status_code == 422
 
     def test_rejects_languages_over_max_count(self, authenticated_client):
-        response = authenticated_client.post("/profile/intent", json={
-            "languages": ["Python"] * 11,
-            "stack_areas": ["backend"],
-            "text": "Some valid intent text",
-        })
+        response = authenticated_client.post(
+            "/profile/intent",
+            json={
+                "languages": ["Python"] * 11,
+                "stack_areas": ["backend"],
+                "text": "Some valid intent text",
+            },
+        )
         assert response.status_code == 422
 
     def test_invalid_language_returns_400_with_detail(self, authenticated_client):
@@ -116,11 +96,14 @@ class TestIntentValidation:
                 field="language", invalid_value="Cobol", valid_options=["Python"]
             )
 
-            response = authenticated_client.post("/profile/intent", json={
-                "languages": ["Cobol"],
-                "stack_areas": ["backend"],
-                "text": "Some intent text here",
-            })
+            response = authenticated_client.post(
+                "/profile/intent",
+                json={
+                    "languages": ["Cobol"],
+                    "stack_areas": ["backend"],
+                    "text": "Some intent text here",
+                },
+            )
 
             assert response.status_code == 400
             assert "Cobol" in response.json()["detail"]
@@ -133,11 +116,14 @@ class TestIntentValidation:
                 field="stack_area", invalid_value="hacking", valid_options=["backend"]
             )
 
-            response = authenticated_client.post("/profile/intent", json={
-                "languages": ["Python"],
-                "stack_areas": ["hacking"],
-                "text": "Some intent text here",
-            })
+            response = authenticated_client.post(
+                "/profile/intent",
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["hacking"],
+                    "text": "Some intent text here",
+                },
+            )
 
             assert response.status_code == 400
             assert "hacking" in response.json()["detail"]
@@ -147,15 +133,21 @@ class TestPreferencesValidation:
     """Tests input validation rules for preferences endpoints."""
 
     def test_rejects_threshold_above_1(self, authenticated_client):
-        response = authenticated_client.patch("/profile/preferences", json={
-            "min_heat_threshold": 1.5,
-        })
+        response = authenticated_client.patch(
+            "/profile/preferences",
+            json={
+                "min_heat_threshold": 1.5,
+            },
+        )
         assert response.status_code == 422
 
     def test_rejects_threshold_below_0(self, authenticated_client):
-        response = authenticated_client.patch("/profile/preferences", json={
-            "min_heat_threshold": -0.1,
-        })
+        response = authenticated_client.patch(
+            "/profile/preferences",
+            json={
+                "min_heat_threshold": -0.1,
+            },
+        )
         assert response.status_code == 422
 
     def test_accepts_boundary_threshold_0(self, authenticated_client):
@@ -166,9 +158,12 @@ class TestPreferencesValidation:
             mock_profile.min_heat_threshold = 0.0
             mock_update.return_value = mock_profile
 
-            response = authenticated_client.patch("/profile/preferences", json={
-                "min_heat_threshold": 0.0,
-            })
+            response = authenticated_client.patch(
+                "/profile/preferences",
+                json={
+                    "min_heat_threshold": 0.0,
+                },
+            )
             assert response.status_code == 200
 
     def test_accepts_boundary_threshold_1(self, authenticated_client):
@@ -179,9 +174,12 @@ class TestPreferencesValidation:
             mock_profile.min_heat_threshold = 1.0
             mock_update.return_value = mock_profile
 
-            response = authenticated_client.patch("/profile/preferences", json={
-                "min_heat_threshold": 1.0,
-            })
+            response = authenticated_client.patch(
+                "/profile/preferences",
+                json={
+                    "min_heat_threshold": 1.0,
+                },
+            )
             assert response.status_code == 200
 
 
@@ -194,11 +192,14 @@ class TestConflictHandling:
         with patch("gim_backend.api.routes.profile.create_intent_service") as mock_create:
             mock_create.side_effect = IntentAlreadyExistsError("Intent already exists")
 
-            response = authenticated_client.post("/profile/intent", json={
-                "languages": ["Python"],
-                "stack_areas": ["backend"],
-                "text": "Some intent text here",
-            })
+            response = authenticated_client.post(
+                "/profile/intent",
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["backend"],
+                    "text": "Some intent text here",
+                },
+            )
             assert response.status_code == 409
 
     def test_get_intent_returns_404_when_missing(self, authenticated_client):
@@ -214,9 +215,12 @@ class TestConflictHandling:
         with patch("gim_backend.api.routes.profile.update_intent_service") as mock_update:
             mock_update.side_effect = IntentNotFoundError("No intent exists")
 
-            response = authenticated_client.patch("/profile/intent", json={
-                "text": "Updated text here",
-            })
+            response = authenticated_client.patch(
+                "/profile/intent",
+                json={
+                    "text": "Updated text here",
+                },
+            )
             assert response.status_code == 404
 
     def test_delete_intent_returns_404_when_missing(self, authenticated_client):
@@ -281,11 +285,14 @@ class TestResponseStructure:
             mock_profile.updated_at = datetime.now(UTC)
             mock_create.return_value = mock_profile
 
-            response = authenticated_client.post("/profile/intent", json={
-                "languages": ["Python"],
-                "stack_areas": ["backend"],
-                "text": "Test intent text here",
-            })
+            response = authenticated_client.post(
+                "/profile/intent",
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["backend"],
+                    "text": "Test intent text here",
+                },
+            )
 
             assert response.status_code == 201
 
@@ -301,19 +308,22 @@ class TestPutIntent:
         mock_profile.intent_stack_areas = ["backend"]
         mock_profile.intent_text = "Test intent"
         mock_profile.intent_experience = None
-        mock_profile.intent_vector = [0.1] * 768
+        mock_profile.intent_vector = [0.1] * 256
         mock_profile.updated_at = datetime.now(UTC)
 
         with patch(
             "gim_backend.api.routes.profile.put_intent_service",
             return_value=(mock_profile, True),
         ):
-            response = authenticated_client.put("/profile/intent", json={
-                "languages": ["Python"],
-                "stack_areas": ["backend"],
-                "text": "Test intent text here",
-                "experience_level": None,
-            })
+            response = authenticated_client.put(
+                "/profile/intent",
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["backend"],
+                    "text": "Test intent text here",
+                    "experience_level": None,
+                },
+            )
 
         assert response.status_code == 201
         assert response.json()["languages"] == ["Python"]
@@ -326,19 +336,22 @@ class TestPutIntent:
         mock_profile.intent_stack_areas = ["backend"]
         mock_profile.intent_text = "Test intent"
         mock_profile.intent_experience = "intermediate"
-        mock_profile.intent_vector = [0.1] * 768
+        mock_profile.intent_vector = [0.1] * 256
         mock_profile.updated_at = datetime.now(UTC)
 
         with patch(
             "gim_backend.api.routes.profile.put_intent_service",
             return_value=(mock_profile, False),
         ):
-            response = authenticated_client.put("/profile/intent", json={
-                "languages": ["Python"],
-                "stack_areas": ["backend"],
-                "text": "Test intent text here",
-                "experience_level": "intermediate",
-            })
+            response = authenticated_client.put(
+                "/profile/intent",
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["backend"],
+                    "text": "Test intent text here",
+                    "experience_level": "intermediate",
+                },
+            )
 
         assert response.status_code == 200
 
@@ -418,10 +431,10 @@ class TestProcessingStatus:
         mock_profile.intent_text = "Some intent"
         mock_profile.resume_skills = None
         mock_profile.github_username = None
-        mock_profile.intent_vector = [0.1] * 768
+        mock_profile.intent_vector = [0.1] * 256
         mock_profile.resume_vector = None
         mock_profile.github_vector = None
-        mock_profile.combined_vector = [0.2] * 768
+        mock_profile.combined_vector = [0.2] * 256
 
         with patch(
             "gim_backend.api.routes.profile.get_or_create_profile",
@@ -451,9 +464,12 @@ class TestPatchSemantics:
             mock_profile.updated_at = datetime.now(UTC)
             mock_update.return_value = mock_profile
 
-            response = authenticated_client.patch("/profile/intent", json={
-                "experience_level": "advanced",
-            })
+            response = authenticated_client.patch(
+                "/profile/intent",
+                json={
+                    "experience_level": "advanced",
+                },
+            )
 
             assert response.status_code == 200
             call_kwargs = mock_update.call_args.kwargs
@@ -471,9 +487,12 @@ class TestPatchSemantics:
             mock_profile.updated_at = datetime.now(UTC)
             mock_update.return_value = mock_profile
 
-            _ = authenticated_client.patch("/profile/intent", json={
-                "experience_level": None,
-            })
+            _ = authenticated_client.patch(
+                "/profile/intent",
+                json={
+                    "experience_level": None,
+                },
+            )
 
             call_kwargs = mock_update.call_args.kwargs
             assert call_kwargs["_experience_level_provided"] is True
@@ -487,9 +506,12 @@ class TestPatchSemantics:
             mock_profile.min_heat_threshold = 0.8
             mock_update.return_value = mock_profile
 
-            response = authenticated_client.patch("/profile/preferences", json={
-                "min_heat_threshold": 0.8,
-            })
+            response = authenticated_client.patch(
+                "/profile/preferences",
+                json={
+                    "min_heat_threshold": 0.8,
+                },
+            )
 
             assert response.status_code == 200
             call_kwargs = mock_update.call_args.kwargs
@@ -535,7 +557,7 @@ class TestVectorGeneration:
     """Verifies vector generation integration during intent CRUD."""
 
     def test_create_intent_generates_intent_vector(self, authenticated_client):
-        mock_vector = [0.1] * 768
+        mock_vector = [0.1] * 256
 
         with patch("gim_backend.api.routes.profile.create_intent_service") as mock_create:
             mock_profile = MagicMock()
@@ -547,11 +569,14 @@ class TestVectorGeneration:
             mock_profile.updated_at = datetime.now(UTC)
             mock_create.return_value = mock_profile
 
-            response = authenticated_client.post("/profile/intent", json={
-                "languages": ["Python"],
-                "stack_areas": ["backend"],
-                "text": "I want to contribute to Python projects",
-            })
+            response = authenticated_client.post(
+                "/profile/intent",
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["backend"],
+                    "text": "I want to contribute to Python projects",
+                },
+            )
 
             assert response.status_code == 201
             data = response.json()
@@ -596,7 +621,7 @@ class TestVectorGeneration:
             assert data["sources"]["intent"]["vector_status"] == "ready"
 
     def test_update_intent_regenerates_vector_when_text_changes(self, authenticated_client):
-        mock_vector = [0.2] * 768
+        mock_vector = [0.2] * 256
 
         with patch("gim_backend.api.routes.profile.update_intent_service") as mock_update:
             mock_profile = MagicMock()
@@ -608,16 +633,19 @@ class TestVectorGeneration:
             mock_profile.updated_at = datetime.now(UTC)
             mock_update.return_value = mock_profile
 
-            response = authenticated_client.patch("/profile/intent", json={
-                "text": "Updated intent text here",
-            })
+            response = authenticated_client.patch(
+                "/profile/intent",
+                json={
+                    "text": "Updated intent text here",
+                },
+            )
 
             assert response.status_code == 200
             data = response.json()
             assert data["vector_status"] == "ready"
 
     def test_update_intent_regenerates_vector_when_stack_areas_change(self, authenticated_client):
-        mock_vector = [0.3] * 768
+        mock_vector = [0.3] * 256
 
         with patch("gim_backend.api.routes.profile.update_intent_service") as mock_update:
             mock_profile = MagicMock()
@@ -629,9 +657,12 @@ class TestVectorGeneration:
             mock_profile.updated_at = datetime.now(UTC)
             mock_update.return_value = mock_profile
 
-            response = authenticated_client.patch("/profile/intent", json={
-                "stack_areas": ["frontend", "backend"],
-            })
+            response = authenticated_client.patch(
+                "/profile/intent",
+                json={
+                    "stack_areas": ["frontend", "backend"],
+                },
+            )
 
             assert response.status_code == 200
             data = response.json()

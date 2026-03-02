@@ -1,58 +1,16 @@
 """Integration tests for bookmarks and notes API routes."""
+
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-
-from gim_backend.main import app
-from gim_backend.middleware.auth import require_auth
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = uuid4()
-    user.email = "test@example.com"
-    return user
-
-
-@pytest.fixture
-def mock_session(mock_user):
-    session = MagicMock()
-    session.id = uuid4()
-    session.user_id = mock_user.id
-    return session
-
-
-@pytest.fixture
-def authenticated_client(client, mock_user, mock_session):
-    def mock_require_auth():
-        return (mock_user, mock_session)
-
-    app.dependency_overrides[require_auth] = mock_require_auth
-    yield client
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture
 def mock_bookmark():
     from gim_backend.services.bookmark_service import BookmarkSchema
+
     return BookmarkSchema(
         id=uuid4(),
         issue_node_id="I_abc123",
@@ -68,6 +26,7 @@ def mock_bookmark():
 @pytest.fixture
 def mock_note(mock_bookmark):
     from gim_backend.services.bookmark_service import NoteSchema
+
     return NoteSchema(
         id=uuid4(),
         bookmark_id=mock_bookmark.id,
@@ -79,17 +38,29 @@ def mock_note(mock_bookmark):
 class TestAuthRequired:
     """Verifies authentication middleware is applied to all bookmark routes."""
 
-    @pytest.mark.parametrize("method,path,body", [
-        ("post", "/bookmarks", {"issue_node_id": "I_123", "github_url": "https://github.com/o/r/issues/1", "title_snapshot": "T", "body_snapshot": "B"}),
-        ("get", "/bookmarks", None),
-        ("get", f"/bookmarks/{uuid4()}", None),
-        ("patch", f"/bookmarks/{uuid4()}", {"is_resolved": True}),
-        ("delete", f"/bookmarks/{uuid4()}", None),
-        ("post", f"/bookmarks/{uuid4()}/notes", {"content": "Note"}),
-        ("get", f"/bookmarks/{uuid4()}/notes", None),
-        ("patch", f"/bookmarks/notes/{uuid4()}", {"content": "Updated"}),
-        ("delete", f"/bookmarks/notes/{uuid4()}", None),
-    ])
+    @pytest.mark.parametrize(
+        "method,path,body",
+        [
+            (
+                "post",
+                "/bookmarks",
+                {
+                    "issue_node_id": "I_123",
+                    "github_url": "https://github.com/o/r/issues/1",
+                    "title_snapshot": "T",
+                    "body_snapshot": "B",
+                },
+            ),
+            ("get", "/bookmarks", None),
+            ("get", f"/bookmarks/{uuid4()}", None),
+            ("patch", f"/bookmarks/{uuid4()}", {"is_resolved": True}),
+            ("delete", f"/bookmarks/{uuid4()}", None),
+            ("post", f"/bookmarks/{uuid4()}/notes", {"content": "Note"}),
+            ("get", f"/bookmarks/{uuid4()}/notes", None),
+            ("patch", f"/bookmarks/notes/{uuid4()}", {"content": "Updated"}),
+            ("delete", f"/bookmarks/notes/{uuid4()}", None),
+        ],
+    )
     def test_returns_401_without_auth(self, client, method, path, body):
         if body:
             response = getattr(client, method)(path, json=body)
@@ -102,39 +73,51 @@ class TestBookmarkValidation:
     """Tests input validation for bookmark endpoints."""
 
     def test_rejects_invalid_github_url_pattern(self, authenticated_client):
-        response = authenticated_client.post("/bookmarks", json={
-            "issue_node_id": "I_abc123",
-            "github_url": "https://gitlab.com/org/repo/issues/1",
-            "title_snapshot": "Title",
-            "body_snapshot": "Body",
-        })
+        response = authenticated_client.post(
+            "/bookmarks",
+            json={
+                "issue_node_id": "I_abc123",
+                "github_url": "https://gitlab.com/org/repo/issues/1",
+                "title_snapshot": "Title",
+                "body_snapshot": "Body",
+            },
+        )
         assert response.status_code == 422
 
     def test_rejects_empty_issue_node_id(self, authenticated_client):
-        response = authenticated_client.post("/bookmarks", json={
-            "issue_node_id": "",
-            "github_url": "https://github.com/org/repo/issues/1",
-            "title_snapshot": "Title",
-            "body_snapshot": "Body",
-        })
+        response = authenticated_client.post(
+            "/bookmarks",
+            json={
+                "issue_node_id": "",
+                "github_url": "https://github.com/org/repo/issues/1",
+                "title_snapshot": "Title",
+                "body_snapshot": "Body",
+            },
+        )
         assert response.status_code == 422
 
     def test_rejects_title_over_max_length(self, authenticated_client):
-        response = authenticated_client.post("/bookmarks", json={
-            "issue_node_id": "I_abc123",
-            "github_url": "https://github.com/org/repo/issues/1",
-            "title_snapshot": "x" * 501,
-            "body_snapshot": "Body",
-        })
+        response = authenticated_client.post(
+            "/bookmarks",
+            json={
+                "issue_node_id": "I_abc123",
+                "github_url": "https://github.com/org/repo/issues/1",
+                "title_snapshot": "x" * 501,
+                "body_snapshot": "Body",
+            },
+        )
         assert response.status_code == 422
 
     def test_rejects_body_over_max_length(self, authenticated_client):
-        response = authenticated_client.post("/bookmarks", json={
-            "issue_node_id": "I_abc123",
-            "github_url": "https://github.com/org/repo/issues/1",
-            "title_snapshot": "Title",
-            "body_snapshot": "x" * 5001,
-        })
+        response = authenticated_client.post(
+            "/bookmarks",
+            json={
+                "issue_node_id": "I_abc123",
+                "github_url": "https://github.com/org/repo/issues/1",
+                "title_snapshot": "Title",
+                "body_snapshot": "x" * 5001,
+            },
+        )
         assert response.status_code == 422
 
 
@@ -145,12 +128,15 @@ class TestBookmarkCRUD:
         with patch("gim_backend.api.routes.bookmarks.create_bookmark_service", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = mock_bookmark
 
-            response = authenticated_client.post("/bookmarks", json={
-                "issue_node_id": "I_abc123",
-                "github_url": "https://github.com/org/repo/issues/1",
-                "title_snapshot": "Bug title",
-                "body_snapshot": "Bug body",
-            })
+            response = authenticated_client.post(
+                "/bookmarks",
+                json={
+                    "issue_node_id": "I_abc123",
+                    "github_url": "https://github.com/org/repo/issues/1",
+                    "title_snapshot": "Bug title",
+                    "body_snapshot": "Bug body",
+                },
+            )
 
             assert response.status_code == 201
             data = response.json()
@@ -164,12 +150,15 @@ class TestBookmarkCRUD:
         with patch("gim_backend.api.routes.bookmarks.create_bookmark_service", new_callable=AsyncMock) as mock_create:
             mock_create.side_effect = BookmarkAlreadyExistsError()
 
-            response = authenticated_client.post("/bookmarks", json={
-                "issue_node_id": "I_abc123",
-                "github_url": "https://github.com/org/repo/issues/1",
-                "title_snapshot": "Title",
-                "body_snapshot": "Body",
-            })
+            response = authenticated_client.post(
+                "/bookmarks",
+                json={
+                    "issue_node_id": "I_abc123",
+                    "github_url": "https://github.com/org/repo/issues/1",
+                    "title_snapshot": "Title",
+                    "body_snapshot": "Body",
+                },
+            )
 
             assert response.status_code == 409
 
@@ -225,10 +214,7 @@ class TestBookmarkCRUD:
             mock_bookmark.is_resolved = True
             mock_update.return_value = mock_bookmark
 
-            response = authenticated_client.patch(
-                f"/bookmarks/{mock_bookmark.id}",
-                json={"is_resolved": True}
-            )
+            response = authenticated_client.patch(f"/bookmarks/{mock_bookmark.id}", json={"is_resolved": True})
 
             assert response.status_code == 200
             data = response.json()
@@ -238,10 +224,7 @@ class TestBookmarkCRUD:
         with patch("gim_backend.api.routes.bookmarks.update_bookmark_service", new_callable=AsyncMock) as mock_update:
             mock_update.return_value = None
 
-            response = authenticated_client.patch(
-                f"/bookmarks/{uuid4()}",
-                json={"is_resolved": True}
-            )
+            response = authenticated_client.patch(f"/bookmarks/{uuid4()}", json={"is_resolved": True})
 
             assert response.status_code == 404
 
@@ -272,8 +255,7 @@ class TestNoteCRUD:
             mock_create.return_value = mock_note
 
             response = authenticated_client.post(
-                f"/bookmarks/{mock_bookmark.id}/notes",
-                json={"content": "My note content"}
+                f"/bookmarks/{mock_bookmark.id}/notes", json={"content": "My note content"}
             )
 
             assert response.status_code == 201
@@ -284,10 +266,7 @@ class TestNoteCRUD:
         with patch("gim_backend.api.routes.bookmarks.create_note_service", new_callable=AsyncMock) as mock_create:
             mock_create.return_value = None
 
-            response = authenticated_client.post(
-                f"/bookmarks/{uuid4()}/notes",
-                json={"content": "Note content"}
-            )
+            response = authenticated_client.post(f"/bookmarks/{uuid4()}/notes", json={"content": "Note content"})
 
             assert response.status_code == 404
 
@@ -316,8 +295,7 @@ class TestNoteCRUD:
             mock_update.return_value = mock_note
 
             response = authenticated_client.patch(
-                f"/bookmarks/notes/{mock_note.id}",
-                json={"content": "Updated content"}
+                f"/bookmarks/notes/{mock_note.id}", json={"content": "Updated content"}
             )
 
             assert response.status_code == 200
@@ -328,10 +306,7 @@ class TestNoteCRUD:
         with patch("gim_backend.api.routes.bookmarks.update_note_service", new_callable=AsyncMock) as mock_update:
             mock_update.return_value = None
 
-            response = authenticated_client.patch(
-                f"/bookmarks/notes/{uuid4()}",
-                json={"content": "New content"}
-            )
+            response = authenticated_client.patch(f"/bookmarks/notes/{uuid4()}", json={"content": "New content"})
 
             assert response.status_code == 404
 
@@ -358,17 +333,11 @@ class TestNoteValidation:
     """Tests input validation for note endpoints."""
 
     def test_rejects_empty_note_content(self, authenticated_client, mock_bookmark):
-        response = authenticated_client.post(
-            f"/bookmarks/{mock_bookmark.id}/notes",
-            json={"content": ""}
-        )
+        response = authenticated_client.post(f"/bookmarks/{mock_bookmark.id}/notes", json={"content": ""})
         assert response.status_code == 422
 
     def test_rejects_note_content_over_max_length(self, authenticated_client, mock_bookmark):
-        response = authenticated_client.post(
-            f"/bookmarks/{mock_bookmark.id}/notes",
-            json={"content": "x" * 5001}
-        )
+        response = authenticated_client.post(f"/bookmarks/{mock_bookmark.id}/notes", json={"content": "x" * 5001})
         assert response.status_code == 422
 
 
@@ -442,10 +411,6 @@ class TestUserIsolation:
         with patch("gim_backend.api.routes.bookmarks.update_note_service", new_callable=AsyncMock) as mock_update:
             mock_update.return_value = None
 
-            response = authenticated_client.patch(
-                f"/bookmarks/notes/{uuid4()}",
-                json={"content": "Trying to update"}
-            )
+            response = authenticated_client.patch(f"/bookmarks/notes/{uuid4()}", json={"content": "Trying to update"})
 
             assert response.status_code == 404
-

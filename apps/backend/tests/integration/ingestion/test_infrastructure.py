@@ -1,10 +1,10 @@
 """Integration tests for Cloud SQL pgvector and Pub/Sub infrastructure validation"""
 
-
 import pytest
 
 try:
     from testcontainers.postgres import PostgresContainer
+
     TESTCONTAINERS_AVAILABLE = True
 except ImportError:
     TESTCONTAINERS_AVAILABLE = False
@@ -16,8 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 # Skip entire module if testcontainers not installed
 pytestmark = pytest.mark.skipif(
-    not TESTCONTAINERS_AVAILABLE,
-    reason="testcontainers[postgres] not installed; requires Docker"
+    not TESTCONTAINERS_AVAILABLE, reason="testcontainers[postgres] not installed; requires Docker"
 )
 
 # Schema with 256-dim vectors for Cloud SQL migration validation
@@ -125,9 +124,7 @@ class TestCloudSQLPgvectorExtension:
     @pytest.mark.asyncio
     async def test_pgvector_extension_installed(self, db_session):
         """Verify pgvector extension is installed"""
-        result = await db_session.exec(
-            text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
-        )
+        result = await db_session.exec(text("SELECT extversion FROM pg_extension WHERE extname = 'vector'"))
         version = result.scalar()
 
         assert version is not None, "pgvector extension not installed"
@@ -135,9 +132,7 @@ class TestCloudSQLPgvectorExtension:
     @pytest.mark.asyncio
     async def test_pgvector_version_supports_hnsw(self, db_session):
         """Verify pgvector version supports HNSW indexes (requires 0.5.0+)"""
-        result = await db_session.exec(
-            text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
-        )
+        result = await db_session.exec(text("SELECT extversion FROM pg_extension WHERE extname = 'vector'"))
         version = result.scalar()
 
         # Parse version (e.g., "0.7.0" -> [0, 7, 0])
@@ -294,9 +289,6 @@ class TestCloudSQLVectorOperations:
         stored_hash = result.scalar()
 
         assert stored_hash == "abc123def456"
-
-
-
 
 
 class TestPubSubIdempotency:

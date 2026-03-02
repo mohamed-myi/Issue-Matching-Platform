@@ -11,10 +11,8 @@ from pathlib import Path
 
 import pytest
 
-# Project root is 4 levels up from this test file
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 
-# Active source directories to scan (excludes docs, migrations, .antigravity)
 ACTIVE_SOURCE_DIRS = [
     PROJECT_ROOT / "apps" / "backend" / "src",
     PROJECT_ROOT / "apps" / "workers" / "src",
@@ -23,7 +21,6 @@ ACTIVE_SOURCE_DIRS = [
     PROJECT_ROOT / "packages" / "shared" / "src",
 ]
 
-# Patterns indicating Vertex AI usage
 VERTEX_AI_PATTERNS = [
     r"from\s+google\.cloud\.aiplatform",
     r"import\s+google\.cloud\.aiplatform",
@@ -33,7 +30,6 @@ VERTEX_AI_PATTERNS = [
     r"BatchPredictionJob",
 ]
 
-# Patterns indicating AlloyDB-specific code (not just comments)
 ALLOYDB_CODE_PATTERNS = [
     r"alloydb\.googleapis\.com",
     r"from\s+google\.cloud\.alloydb",
@@ -96,13 +92,8 @@ class TestNoVertexAIImports:
         matches = _find_pattern_in_files(python_files, VERTEX_AI_PATTERNS)
 
         if matches:
-            match_report = "\n".join(
-                f"  {f.relative_to(PROJECT_ROOT)}:{ln}: {line}"
-                for f, ln, line in matches
-            )
-            pytest.fail(
-                f"Found {len(matches)} Vertex AI reference(s) in active source:\n{match_report}"
-            )
+            match_report = "\n".join(f"  {f.relative_to(PROJECT_ROOT)}:{ln}: {line}" for f, ln, line in matches)
+            pytest.fail(f"Found {len(matches)} Vertex AI reference(s) in active source:\n{match_report}")
 
 
 class TestNoAlloyDBReferences:
@@ -122,13 +113,8 @@ class TestNoAlloyDBReferences:
         )
 
         if matches:
-            match_report = "\n".join(
-                f"  {f.relative_to(PROJECT_ROOT)}:{ln}: {line}"
-                for f, ln, line in matches
-            )
-            pytest.fail(
-                f"Found {len(matches)} AlloyDB code reference(s) in active source:\n{match_report}"
-            )
+            match_report = "\n".join(f"  {f.relative_to(PROJECT_ROOT)}:{ln}: {line}" for f, ln, line in matches)
+            pytest.fail(f"Found {len(matches)} AlloyDB code reference(s) in active source:\n{match_report}")
 
 
 class TestEmbeddingDimIs256:
@@ -170,9 +156,7 @@ class TestEmbeddingDimIs256:
 
         unique_dims = set(dims.values())
 
-        assert len(unique_dims) == 1, (
-            f"Inconsistent EMBEDDING_DIM values across modules: {dims}"
-        )
+        assert len(unique_dims) == 1, f"Inconsistent EMBEDDING_DIM values across modules: {dims}"
         assert unique_dims.pop() == 256, "All EMBEDDING_DIM values should be 256"
 
 
@@ -192,9 +176,10 @@ class TestNoDeprecatedConfigSettings:
         """Verify gcs_buffer_flush_threshold setting has been removed from config."""
         from gim_backend.core.config import Settings
 
-        assert not hasattr(Settings, "gcs_buffer_flush_threshold") or "gcs_buffer_flush_threshold" not in Settings.model_fields, (
-            "gcs_buffer_flush_threshold setting should be removed from config"
-        )
+        assert (
+            not hasattr(Settings, "gcs_buffer_flush_threshold")
+            or "gcs_buffer_flush_threshold" not in Settings.model_fields
+        ), "gcs_buffer_flush_threshold setting should be removed from config"
 
     def test_embedding_mode_defaults_to_nomic(self):
         """Verify embedding_mode defaults to 'nomic' not 'vertex'."""

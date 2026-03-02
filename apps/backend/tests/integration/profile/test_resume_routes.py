@@ -1,62 +1,21 @@
 """Integration tests for resume profile API routes."""
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-from gim_backend.main import app
-from gim_backend.middleware.auth import require_auth
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = uuid4()
-    user.email = "test@example.com"
-    return user
-
-
-@pytest.fixture
-def mock_session(mock_user):
-    session = MagicMock()
-    session.id = uuid4()
-    session.user_id = mock_user.id
-    return session
-
-
-@pytest.fixture
-def authenticated_client(client, mock_user, mock_session):
-    def mock_require_auth():
-        return (mock_user, mock_session)
-
-    app.dependency_overrides[require_auth] = mock_require_auth
-    yield client
-    app.dependency_overrides.clear()
 
 
 class TestAuthRequired:
     """Verifies authentication middleware is applied to all resume routes."""
 
-    @pytest.mark.parametrize("method,path", [
-        ("post", "/profile/resume"),
-        ("get", "/profile/resume"),
-        ("delete", "/profile/resume"),
-    ])
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("post", "/profile/resume"),
+            ("get", "/profile/resume"),
+            ("delete", "/profile/resume"),
+        ],
+    )
     def test_returns_401_without_auth(self, client, method, path):
         if method == "post":
             response = client.post(path, files={"file": ("resume.pdf", b"content", "application/pdf")})
@@ -74,6 +33,7 @@ class TestPostResume:
             new_callable=AsyncMock,
         ) as mock_initiate:
             from gim_backend.services.resume_parsing_service import UnsupportedFormatError
+
             mock_initiate.side_effect = UnsupportedFormatError("Please upload a PDF or DOCX file")
 
             response = authenticated_client.post(
@@ -266,6 +226,7 @@ class TestErrorMessages:
             new_callable=AsyncMock,
         ) as mock_initiate:
             from gim_backend.services.resume_parsing_service import UnsupportedFormatError
+
             mock_initiate.side_effect = UnsupportedFormatError("Please upload a PDF or DOCX file")
 
             response = authenticated_client.post(

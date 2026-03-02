@@ -7,17 +7,8 @@ from fastapi.testclient import TestClient
 
 from gim_backend.main import app
 from gim_backend.middleware.auth import require_auth
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
 from gim_backend.services.feed_service import FeedItem, FeedPage
 from gim_backend.services.why_this_service import WhyThisItem
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture
@@ -36,6 +27,7 @@ def authenticated_client(client):
     app.dependency_overrides[require_auth] = _mock_require_auth
     yield client
     app.dependency_overrides.clear()
+
 
 def _create_mock_feed(is_personalized: bool) -> FeedPage:
     item = FeedItem(
@@ -77,4 +69,3 @@ def test_feed_includes_why_this_only_when_personalized(authenticated_client):
     assert resp2.status_code == 200
     payload2 = resp2.json()
     assert payload2["results"][0].get("why_this") is None
-

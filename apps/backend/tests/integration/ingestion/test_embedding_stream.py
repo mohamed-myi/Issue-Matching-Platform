@@ -7,6 +7,7 @@ import pytest
 
 try:
     from sentence_transformers import SentenceTransformer
+
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     SENTENCE_TRANSFORMERS_AVAILABLE = False
@@ -16,13 +17,9 @@ from gim_backend.ingestion.embeddings import (
     embed_issue_stream,
 )
 from gim_backend.ingestion.gatherer import IssueData
-from gim_backend.ingestion.quality_gate import QScoreComponents
 
 # Skip entire module if sentence-transformers not installed
-pytestmark = pytest.mark.skipif(
-    not SENTENCE_TRANSFORMERS_AVAILABLE,
-    reason="sentence-transformers not installed"
-)
+pytestmark = pytest.mark.skipif(not SENTENCE_TRANSFORMERS_AVAILABLE, reason="sentence-transformers not installed")
 
 
 # Test model dimensions (all-MiniLM-L6-v2 produces 384-dim vectors)
@@ -63,16 +60,6 @@ class IntegrationEmbedder:
 
 
 @pytest.fixture
-def sample_q_components():
-    return QScoreComponents(
-        has_code=True,
-        has_headers=True,
-        tech_weight=0.5,
-        is_junk=False,
-    )
-
-
-@pytest.fixture
 def make_issue(sample_q_components):
     def _make(node_id: str = "I_123", title: str = "Bug report", body: str = "Description"):
         return IssueData(
@@ -86,6 +73,7 @@ def make_issue(sample_q_components):
             q_components=sample_q_components,
             state="open",
         )
+
     return _make
 
 
@@ -175,11 +163,14 @@ class TestEmbedStream100Issues:
             for i in range(issue_count):
                 yield make_issue(node_id=f"ORDER_{i}")
 
-        results = [item async for item in embed_issue_stream(
-            ordered_issues(),
-            test_embedder,
-            batch_size=25,
-        )]
+        results = [
+            item
+            async for item in embed_issue_stream(
+                ordered_issues(),
+                test_embedder,
+                batch_size=25,
+            )
+        ]
 
         for i, result in enumerate(results):
             assert result.issue.node_id == f"ORDER_{i}", (
@@ -195,11 +186,14 @@ class TestEmbedStream100Issues:
             for i in range(issue_count):
                 yield make_issue(node_id=f"I_{i}")
 
-        results = [item async for item in embed_issue_stream(
-            issue_generator(),
-            test_embedder,
-            batch_size=25,
-        )]
+        results = [
+            item
+            async for item in embed_issue_stream(
+                issue_generator(),
+                test_embedder,
+                batch_size=25,
+            )
+        ]
 
         assert len(results) == issue_count
 
@@ -241,11 +235,14 @@ class TestEmbeddingQuality:
             yield issue2
             yield issue3
 
-        results = [item async for item in embed_issue_stream(
-            issue_stream(),
-            test_embedder,
-            batch_size=25,
-        )]
+        results = [
+            item
+            async for item in embed_issue_stream(
+                issue_stream(),
+                test_embedder,
+                batch_size=25,
+            )
+        ]
 
         emb1, emb2, emb3 = [r.embedding for r in results]
 
@@ -253,24 +250,26 @@ class TestEmbeddingQuality:
         sim_1_3 = cosine_similarity(emb1, emb3)
 
         # Similar issues should have higher similarity than different ones
-        assert sim_1_2 > sim_1_3, (
-            f"Similar issues should have higher similarity: {sim_1_2:.3f} vs {sim_1_3:.3f}"
-        )
+        assert sim_1_2 > sim_1_3, f"Similar issues should have higher similarity: {sim_1_2:.3f} vs {sim_1_3:.3f}"
         # Similar issues should have cosine > 0.7
         assert sim_1_2 > 0.7, f"Similar issues have low similarity: {sim_1_2:.3f}"
 
     @pytest.mark.asyncio
     async def test_empty_stream_yields_nothing(self, test_embedder):
         """Empty input stream should yield empty output"""
+
         async def empty_stream():
             return
             yield  # Makes this an async generator
 
-        results = [item async for item in embed_issue_stream(
-            empty_stream(),
-            test_embedder,
-            batch_size=25,
-        )]
+        results = [
+            item
+            async for item in embed_issue_stream(
+                empty_stream(),
+                test_embedder,
+                batch_size=25,
+            )
+        ]
 
         assert len(results) == 0
 
@@ -300,14 +299,16 @@ class TestTextFormatting:
         test_embedder.embed_batch = capturing_embed
 
         try:
-            _ = [item async for item in embed_issue_stream(
-                single_issue(),
-                test_embedder,
-                batch_size=25,
-            )]
+            _ = [
+                item
+                async for item in embed_issue_stream(
+                    single_issue(),
+                    test_embedder,
+                    batch_size=25,
+                )
+            ]
 
             assert len(captured_texts) == 1
             assert captured_texts[0] == "Specific Title Here\nSpecific body content here"
         finally:
             test_embedder.embed_batch = original_embed
-

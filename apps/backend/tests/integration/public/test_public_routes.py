@@ -2,6 +2,7 @@
 Integration tests for public API routes.
 Tests /feed/trending and /stats without authentication.
 """
+
 from datetime import UTC, datetime
 from unittest.mock import patch
 
@@ -9,15 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gim_backend.main import app
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture
@@ -27,6 +19,7 @@ def client():
 
 class _FeedItem:
     """Mock feed item for testing."""
+
     def __init__(self, node_id: str = "I_test123"):
         self.node_id = node_id
         self.title = "Test Issue"
@@ -43,6 +36,7 @@ class _FeedItem:
 
 class _FeedResponse:
     """Mock feed response for testing."""
+
     def __init__(self, count: int = 3, total: int = 100):
         self.results = [_FeedItem(f"I_test{i}") for i in range(count)]
         self.total = total
@@ -55,6 +49,7 @@ class _FeedResponse:
 
 class _PlatformStats:
     """Mock stats for testing."""
+
     def __init__(self):
         self.total_issues = 15000
         self.total_repos = 500

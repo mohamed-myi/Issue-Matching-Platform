@@ -8,6 +8,7 @@ Session Limit Integration Tests
 
 These tests verify the Postgres trigger (enforce_session_limit) works correctly.
 """
+
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -16,21 +17,18 @@ from dotenv import dotenv_values
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
-# Load DATABASE_URL from .env files directly
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.parent
 env_local = dotenv_values(PROJECT_ROOT / ".env.local")
 env_base = dotenv_values(PROJECT_ROOT / ".env")
 REAL_DATABASE_URL = env_local.get("DATABASE_URL") or env_base.get("DATABASE_URL") or ""
 
-# Hardcoded test user UUID is clearly labeled as test and does not exist in production
 TEST_USER_UUID = UUID("00000000-0000-0000-0000-000000000001")
 TEST_USER_UUID_2 = UUID("00000000-0000-0000-0000-000000000002")
 
-# Skip if no real database URL
 pytestmark = [
     pytest.mark.skipif(
         not REAL_DATABASE_URL or "localhost" in REAL_DATABASE_URL or "127.0.0.1" in REAL_DATABASE_URL,
-        reason="Real DATABASE_URL not set or points to localhost - skipping production DB tests"
+        reason="Real DATABASE_URL not set or points to localhost - skipping production DB tests",
     ),
 ]
 
@@ -91,7 +89,7 @@ async def create_test_user(conn: AsyncConnection, user_id: UUID, email: str) -> 
             "email": email,
             "github_node_id": f"test_node_{str(user_id)}",
             "github_username": f"test_user_{str(user_id)[:8]}",
-        }
+        },
     )
 
 
@@ -126,7 +124,7 @@ async def create_test_session(
             "user_id": str(user_id),
             "jti": jti,
             "hours_ago": created_hours_ago,
-        }
+        },
     )
 
     return session_id
@@ -143,7 +141,7 @@ async def count_user_sessions(conn: AsyncConnection, user_id: UUID) -> int:
             WHERE user_id = :user_id
             AND expires_at > NOW()
         """),
-        {"user_id": str(user_id)}
+        {"user_id": str(user_id)},
     )
     return result.scalar() or 0
 
@@ -160,7 +158,7 @@ async def get_session_ids_for_user(conn: AsyncConnection, user_id: UUID) -> list
             AND expires_at > NOW()
             ORDER BY created_at ASC
         """),
-        {"user_id": str(user_id)}
+        {"user_id": str(user_id)},
     )
     return [row[0] for row in result.fetchall()]
 
@@ -233,8 +231,7 @@ class TestSessionLimitTrigger:
         # Oldest session should be gone
         remaining_ids = await get_session_ids_for_user(transactional_connection, TEST_USER_UUID)
 
-        assert oldest_session_id not in remaining_ids, \
-            f"Oldest session {oldest_session_id} should have been evicted"
+        assert oldest_session_id not in remaining_ids, f"Oldest session {oldest_session_id} should have been evicted"
 
     @pytest.mark.asyncio
     async def test_eviction_does_not_affect_other_users(self, transactional_connection):
@@ -266,8 +263,9 @@ class TestSessionLimitTrigger:
         # USER_2 sessions must be unnaffected
         user2_count_after = await count_user_sessions(transactional_connection, TEST_USER_UUID_2)
 
-        assert user2_count_after == 5, \
+        assert user2_count_after == 5, (
             f"User 2's sessions should be unaffected, had {user2_count_before}, now {user2_count_after}"
+        )
 
     @pytest.mark.asyncio
     async def test_transaction_rollback_leaves_no_trace(self, transactional_connection):

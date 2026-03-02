@@ -3,6 +3,7 @@ Rate Limiting Integration Tests
 
 Tests the rate limiting behavior through the full HTTP request cycle.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -37,7 +38,7 @@ class TestRateLimitIntegration:
                     headers={"X-Device-Fingerprint": "test_fp"},
                     follow_redirects=False,
                 )
-                assert response.status_code in [302, 307], f"Request {i+1} failed with {response.status_code}"
+                assert response.status_code in [302, 307], f"Request {i + 1} failed with {response.status_code}"
 
             # 11th request should be blocked
             response = client.get(

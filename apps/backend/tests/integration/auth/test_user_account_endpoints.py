@@ -3,6 +3,7 @@
 Tests: GET /auth/me, GET /auth/linked-accounts, GET /auth/sessions/count, DELETE /auth/account
 Focus: Auth requirements, data integrity, GDPR compliance, security.
 """
+
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -11,15 +12,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gim_backend.main import app
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
 
 
 @pytest.fixture
@@ -53,18 +45,17 @@ class TestGetMeEndpointAuthenticated:
     @pytest.fixture
     def mock_auth_flow(self):
         """Mock authentication to return a user"""
-        with patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx, \
-             patch("gim_backend.api.routes.auth.get_current_session") as mock_session, \
-             patch("gim_backend.api.routes.auth.get_current_user") as mock_user, \
-             patch("gim_backend.api.routes.auth.get_db") as mock_db:
-
+        with (
+            patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx,
+            patch("gim_backend.api.routes.auth.require_authenticated_user_session") as mock_auth,
+            patch("gim_backend.api.routes.auth.get_db") as mock_db,
+        ):
             context = MagicMock()
             context.ip_address = "127.0.0.1"
             mock_ctx.return_value = context
 
             session = MagicMock()
             session.id = uuid4()
-            mock_session.return_value = session
 
             user = MagicMock()
             user.id = uuid4()
@@ -73,10 +64,11 @@ class TestGetMeEndpointAuthenticated:
             user.google_id = None
             user.created_at = datetime.now(UTC)
             user.created_via = "github"
-            mock_user.return_value = user
+            mock_auth.return_value = (user, session)
 
             async def mock_db_gen():
                 yield MagicMock()
+
             mock_db.return_value = mock_db_gen()
 
             yield {"user": user, "session": session}
@@ -113,25 +105,25 @@ class TestGetLinkedAccountsAuthenticated:
     @pytest.fixture
     def mock_auth_and_accounts(self):
         """Mock authentication and linked accounts service"""
-        with patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx, \
-             patch("gim_backend.api.routes.auth.get_current_session") as mock_session, \
-             patch("gim_backend.api.routes.auth.get_current_user") as mock_user, \
-             patch("gim_backend.api.routes.auth.list_linked_accounts") as mock_list, \
-             patch("gim_backend.api.routes.auth.get_db") as mock_db:
-
+        with (
+            patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx,
+            patch("gim_backend.api.routes.auth.require_authenticated_user_session") as mock_auth,
+            patch("gim_backend.api.routes.auth.list_linked_accounts") as mock_list,
+            patch("gim_backend.api.routes.auth.get_db") as mock_db,
+        ):
             context = MagicMock()
             mock_ctx.return_value = context
 
             session = MagicMock()
             session.id = uuid4()
-            mock_session.return_value = session
 
             user = MagicMock()
             user.id = uuid4()
-            mock_user.return_value = user
+            mock_auth.return_value = (user, session)
 
             async def mock_db_gen():
                 yield MagicMock()
+
             mock_db.return_value = mock_db_gen()
 
             yield {"mock_list": mock_list, "user": user}
@@ -175,26 +167,26 @@ class TestDeleteAccountAuthenticated:
     @pytest.fixture
     def mock_auth_and_cascade(self):
         """Mock authentication and cascade deletion"""
-        with patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx, \
-             patch("gim_backend.api.routes.auth.get_current_session") as mock_session, \
-             patch("gim_backend.api.routes.auth.get_current_user") as mock_user, \
-             patch("gim_backend.api.routes.auth.delete_user_cascade") as mock_cascade, \
-             patch("gim_backend.api.routes.auth.log_audit_event"), \
-             patch("gim_backend.api.routes.auth.get_db") as mock_db:
-
+        with (
+            patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx,
+            patch("gim_backend.api.routes.auth.require_authenticated_user_session") as mock_auth,
+            patch("gim_backend.api.routes.auth.delete_user_cascade") as mock_cascade,
+            patch("gim_backend.api.routes.auth.log_audit_event"),
+            patch("gim_backend.api.routes.auth.get_db") as mock_db,
+        ):
             context = MagicMock()
             context.ip_address = "127.0.0.1"
             mock_ctx.return_value = context
 
             session = MagicMock()
             session.id = uuid4()
-            mock_session.return_value = session
 
             user = MagicMock()
             user.id = uuid4()
-            mock_user.return_value = user
+            mock_auth.return_value = (user, session)
 
             from gim_backend.services.session_service import CascadeDeletionResult
+
             mock_cascade.return_value = CascadeDeletionResult(
                 tables_affected=["users", "sessions"],
                 total_rows=2,
@@ -202,6 +194,7 @@ class TestDeleteAccountAuthenticated:
 
             async def mock_db_gen():
                 yield MagicMock()
+
             mock_db.return_value = mock_db_gen()
 
             yield {"user": user, "session": session, "mock_cascade": mock_cascade}
@@ -220,12 +213,13 @@ class TestPostDeleteAccess:
 
     def test_deleted_user_gets_401_on_me(self, client):
         """After deletion, accessing /auth/me with old session returns 401"""
-        with patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx, \
-             patch("gim_backend.api.routes.auth.get_current_session") as mock_session:
-
+        with (
+            patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx,
+            patch("gim_backend.api.routes.auth.require_authenticated_user_session") as mock_auth,
+        ):
             context = MagicMock()
             mock_ctx.return_value = context
-            mock_session.side_effect = Exception("Session not found")
+            mock_auth.side_effect = Exception("Session not found")
 
             response = client.get("/auth/me")
 
@@ -238,28 +232,28 @@ class TestGDPRZombieCheck:
     @pytest.fixture
     def mock_full_flow(self):
         """Mock complete user creation flow"""
-        with patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx, \
-             patch("gim_backend.api.routes.auth.get_current_session") as mock_session, \
-             patch("gim_backend.api.routes.auth.get_current_user") as mock_user, \
-             patch("gim_backend.api.routes.auth.delete_user_cascade") as mock_cascade, \
-             patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert, \
-             patch("gim_backend.api.routes.auth.log_audit_event"), \
-             patch("gim_backend.api.routes.auth.get_db") as mock_db:
-
+        with (
+            patch("gim_backend.api.routes.auth.get_request_context") as mock_ctx,
+            patch("gim_backend.api.routes.auth.require_authenticated_user_session") as mock_auth,
+            patch("gim_backend.api.routes.auth.delete_user_cascade") as mock_cascade,
+            patch("gim_backend.api.routes.auth.upsert_user") as mock_upsert,
+            patch("gim_backend.api.routes.auth.log_audit_event"),
+            patch("gim_backend.api.routes.auth.get_db") as mock_db,
+        ):
             context = MagicMock()
             context.ip_address = "127.0.0.1"
             mock_ctx.return_value = context
 
             session = MagicMock()
             session.id = uuid4()
-            mock_session.return_value = session
 
             user = MagicMock()
             user.id = uuid4()
             user.github_username = "octocat"
-            mock_user.return_value = user
+            mock_auth.return_value = (user, session)
 
             from gim_backend.services.session_service import CascadeDeletionResult
+
             mock_cascade.return_value = CascadeDeletionResult(
                 tables_affected=["users"],
                 total_rows=1,
@@ -270,6 +264,7 @@ class TestGDPRZombieCheck:
 
             async def mock_db_gen():
                 yield MagicMock()
+
             mock_db.return_value = mock_db_gen()
 
             yield {"mock_upsert": mock_upsert, "user": user}

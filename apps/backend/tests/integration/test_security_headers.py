@@ -1,4 +1,5 @@
 """Tests for security headers middleware."""
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -34,7 +35,6 @@ class TestSecurityHeaders:
         """Authenticated endpoints should have security headers."""
         response = client.get("/profile")
 
-        # Will be 401 without auth, but should still have headers
         assert response.status_code == 401
         assert response.headers.get("X-Content-Type-Options") == "nosniff"
         assert response.headers.get("X-Frame-Options") == "DENY"
@@ -45,20 +45,13 @@ class TestCORSConfiguration:
 
     def test_cors_credentials_header_present(self, client):
         """CORS middleware should be active (credentials header present)."""
-        response = client.get(
-            "/health",
-            headers={"Origin": "http://localhost:3000"}
-        )
+        response = client.get("/health", headers={"Origin": "http://localhost:3000"})
 
-        # Verify CORS middleware is active by checking credentials header
         assert response.headers.get("access-control-allow-credentials") == "true"
 
     def test_cors_rejects_unconfigured_origin(self, client):
         """Unconfigured origins should not get CORS allow-origin header."""
-        response = client.get(
-            "/health",
-            headers={"Origin": "https://malicious-site.com"}
-        )
+        response = client.get("/health", headers={"Origin": "https://malicious-site.com"})
 
         # Should NOT include the malicious origin in CORS header
         cors_origin = response.headers.get("access-control-allow-origin", "")

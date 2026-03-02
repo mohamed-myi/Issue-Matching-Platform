@@ -1,75 +1,37 @@
 """Integration tests for onboarding API routes."""
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-
-from gim_backend.main import app
-from gim_backend.middleware.auth import require_auth
-from gim_backend.middleware.rate_limit import reset_rate_limiter, reset_rate_limiter_instance
-
-
-@pytest.fixture(autouse=True)
-def reset_rate_limit():
-    reset_rate_limiter()
-    reset_rate_limiter_instance()
-    yield
-    reset_rate_limiter()
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = uuid4()
-    user.email = "test@example.com"
-    return user
-
-
-@pytest.fixture
-def mock_session(mock_user):
-    session = MagicMock()
-    session.id = uuid4()
-    session.user_id = mock_user.id
-    return session
-
-
-@pytest.fixture
-def authenticated_client(client, mock_user, mock_session):
-    def mock_require_auth():
-        return (mock_user, mock_session)
-
-    app.dependency_overrides[require_auth] = mock_require_auth
-    yield client
-    app.dependency_overrides.clear()
 
 
 class TestAuthRequired:
     """Verifies authentication middleware is applied to onboarding routes."""
 
-    @pytest.mark.parametrize("method,path", [
-        ("get", "/profile/onboarding"),
-        ("post", "/profile/onboarding/start"),
-        ("patch", "/profile/onboarding/step/welcome"),
-        ("patch", "/profile/onboarding/step/intent"),
-        ("patch", "/profile/onboarding/step/preferences"),
-        ("post", "/profile/onboarding/complete"),
-        ("post", "/profile/onboarding/skip"),
-        ("get", "/profile/preview-recommendations"),
-    ])
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("get", "/profile/onboarding"),
+            ("post", "/profile/onboarding/start"),
+            ("patch", "/profile/onboarding/step/welcome"),
+            ("patch", "/profile/onboarding/step/intent"),
+            ("patch", "/profile/onboarding/step/preferences"),
+            ("post", "/profile/onboarding/complete"),
+            ("post", "/profile/onboarding/skip"),
+            ("get", "/profile/preview-recommendations"),
+        ],
+    )
     def test_returns_401_without_auth(self, client, method, path):
         if method == "patch" and path.endswith("/intent"):
-            response = getattr(client, method)(path, json={
-                "languages": ["Python"],
-                "stack_areas": ["backend"],
-                "text": "I want to contribute to open source Python projects",
-            })
+            response = getattr(client, method)(
+                path,
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["backend"],
+                    "text": "I want to contribute to open source Python projects",
+                },
+            )
         elif method == "patch" and path.endswith("/preferences"):
             response = getattr(client, method)(path, json={"min_heat_threshold": 0.7})
         else:
@@ -269,9 +231,7 @@ class TestPreviewRecommendations:
             new_callable=AsyncMock,
             return_value=mock_issues,
         ):
-            response = authenticated_client.get(
-                "/profile/preview-recommendations?source=intent"
-            )
+            response = authenticated_client.get("/profile/preview-recommendations?source=intent")
 
         assert response.status_code == 200
         data = response.json()
@@ -286,9 +246,7 @@ class TestPreviewRecommendations:
             new_callable=AsyncMock,
             return_value=[],
         ):
-            response = authenticated_client.get(
-                "/profile/preview-recommendations?source=intent"
-            )
+            response = authenticated_client.get("/profile/preview-recommendations?source=intent")
 
         assert response.status_code == 200
         assert response.json()["issues"] == []
@@ -326,9 +284,7 @@ class TestPreviewRecommendations:
             new_callable=AsyncMock,
             side_effect=InvalidSourceError("Invalid source: 'invalid'"),
         ):
-            response = authenticated_client.get(
-                "/profile/preview-recommendations?source=invalid"
-            )
+            response = authenticated_client.get("/profile/preview-recommendations?source=invalid")
 
         assert response.status_code == 400
         assert "Invalid source" in response.json()["detail"]
@@ -339,9 +295,7 @@ class TestPreviewRecommendations:
             new_callable=AsyncMock,
             return_value=[],
         ):
-            response = authenticated_client.get(
-                "/profile/preview-recommendations?source=resume"
-            )
+            response = authenticated_client.get("/profile/preview-recommendations?source=resume")
 
         assert response.status_code == 200
         assert response.json()["source"] == "resume"
@@ -352,9 +306,7 @@ class TestPreviewRecommendations:
             new_callable=AsyncMock,
             return_value=[],
         ):
-            response = authenticated_client.get(
-                "/profile/preview-recommendations?source=github"
-            )
+            response = authenticated_client.get("/profile/preview-recommendations?source=github")
 
         assert response.status_code == 200
         assert response.json()["source"] == "github"
@@ -363,9 +315,7 @@ class TestPreviewRecommendations:
 class TestOnboardingAfterIntentCreate:
     """Integration tests verifying onboarding updates after intent creation."""
 
-    def test_creating_intent_transitions_onboarding_to_in_progress(
-        self, authenticated_client
-    ):
+    def test_creating_intent_transitions_onboarding_to_in_progress(self, authenticated_client):
         """
         Verifies that creating intent via POST /profile/intent
         transitions onboarding status from not_started to in_progress.
@@ -378,7 +328,7 @@ class TestOnboardingAfterIntentCreate:
         mock_profile.intent_text = "I want to contribute"
         mock_profile.intent_stack_areas = ["backend"]
         mock_profile.intent_experience = "intermediate"
-        mock_profile.intent_vector = [0.1] * 768
+        mock_profile.intent_vector = [0.1] * 256
         mock_profile.preferred_languages = ["Python"]
         mock_profile.updated_at = datetime.now(UTC)
         mock_profile.onboarding_status = "in_progress"
@@ -388,12 +338,15 @@ class TestOnboardingAfterIntentCreate:
             new_callable=AsyncMock,
             return_value=mock_profile,
         ):
-            response = authenticated_client.post("/profile/intent", json={
-                "languages": ["Python"],
-                "stack_areas": ["backend"],
-                "text": "I want to contribute to open source Python projects",
-                "experience_level": "intermediate",
-            })
+            response = authenticated_client.post(
+                "/profile/intent",
+                json={
+                    "languages": ["Python"],
+                    "stack_areas": ["backend"],
+                    "text": "I want to contribute to open source Python projects",
+                    "experience_level": "intermediate",
+                },
+            )
 
         assert response.status_code == 201
 
@@ -483,6 +436,7 @@ class TestOnboardingStep:
     def test_invalid_step_returns_400(self, authenticated_client):
         response = authenticated_client.patch("/profile/onboarding/step/invalid", json={})
         assert response.status_code == 400
+        assert response.json() == {"detail": "Invalid onboarding step"}
 
     def test_welcome_step_behaves_like_start(self, authenticated_client):
         from gim_backend.services.onboarding_service import OnboardingStartResult, OnboardingState
@@ -494,14 +448,17 @@ class TestOnboardingStep:
             can_complete=False,
         )
 
-        with patch(
-            "gim_backend.api.routes.profile_onboarding.start_onboarding",
-            new_callable=AsyncMock,
-            return_value=OnboardingStartResult(state=mock_state, action="noop"),
-        ), patch(
-            "gim_backend.api.routes.profile_onboarding.get_onboarding_status",
-            new_callable=AsyncMock,
-            return_value=mock_state,
+        with (
+            patch(
+                "gim_backend.api.routes.profile_onboarding.start_onboarding",
+                new_callable=AsyncMock,
+                return_value=OnboardingStartResult(state=mock_state, action="noop"),
+            ),
+            patch(
+                "gim_backend.api.routes.profile_onboarding.get_onboarding_status",
+                new_callable=AsyncMock,
+                return_value=mock_state,
+            ),
         ):
             response = authenticated_client.patch("/profile/onboarding/step/welcome")
 
@@ -530,17 +487,20 @@ class TestOnboardingStep:
         mock_profile.intent_stack_areas = ["backend"]
         mock_profile.intent_text = "I want to contribute"
         mock_profile.intent_experience = None
-        mock_profile.intent_vector = [0.1] * 768
+        mock_profile.intent_vector = [0.1] * 256
         mock_profile.updated_at = datetime.now(UTC)
 
-        with patch(
-            "gim_backend.api.routes.profile_onboarding.put_intent_service",
-            new_callable=AsyncMock,
-            return_value=(mock_profile, True),
-        ), patch(
-            "gim_backend.api.routes.profile_onboarding.get_onboarding_status",
-            new_callable=AsyncMock,
-            return_value=mock_state,
+        with (
+            patch(
+                "gim_backend.api.routes.profile_onboarding.put_intent_service",
+                new_callable=AsyncMock,
+                return_value=(mock_profile, True),
+            ),
+            patch(
+                "gim_backend.api.routes.profile_onboarding.get_onboarding_status",
+                new_callable=AsyncMock,
+                return_value=mock_state,
+            ),
         ):
             response = authenticated_client.patch(
                 "/profile/onboarding/step/intent",
@@ -577,14 +537,17 @@ class TestOnboardingStep:
         mock_profile.preferred_topics = ["async"]
         mock_profile.min_heat_threshold = 0.7
 
-        with patch(
-            "gim_backend.api.routes.profile_onboarding.update_preferences_service",
-            new_callable=AsyncMock,
-            return_value=mock_profile,
-        ), patch(
-            "gim_backend.api.routes.profile_onboarding.get_onboarding_status",
-            new_callable=AsyncMock,
-            return_value=mock_state,
+        with (
+            patch(
+                "gim_backend.api.routes.profile_onboarding.update_preferences_service",
+                new_callable=AsyncMock,
+                return_value=mock_profile,
+            ),
+            patch(
+                "gim_backend.api.routes.profile_onboarding.get_onboarding_status",
+                new_callable=AsyncMock,
+                return_value=mock_state,
+            ),
         ):
             response = authenticated_client.patch(
                 "/profile/onboarding/step/preferences",
@@ -599,4 +562,3 @@ class TestOnboardingStep:
         data = response.json()
         assert data["step"] == "preferences"
         assert data["payload"]["preferences"]["min_heat_threshold"] == 0.7
-

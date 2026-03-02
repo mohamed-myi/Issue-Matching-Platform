@@ -6,47 +6,18 @@ Verify timing benchmarks:
     GitHub fetch: < 15 seconds
     GET /profile: < 100ms
 """
+
 import time
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-
-from gim_backend.main import app
-from gim_backend.middleware.auth import require_auth
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def mock_user():
-    user = MagicMock()
-    user.id = uuid4()
-    user.email = "perf@example.com"
-    return user
-
-
-@pytest.fixture
-def mock_session(mock_user):
-    session = MagicMock()
-    session.id = uuid4()
-    session.user_id = mock_user.id
-    return session
-
-
-@pytest.fixture
-def authenticated_client(client, mock_user, mock_session):
-    def mock_require_auth():
-        return (mock_user, mock_session)
-
-    app.dependency_overrides[require_auth] = mock_require_auth
-    yield client
-    app.dependency_overrides.clear()
+def mock_user_email() -> str:
+    return "perf@example.com"
 
 
 def create_mock_profile(user_id):
@@ -82,9 +53,7 @@ class TestGetProfilePerformance:
     """GET /profile should respond under 100ms."""
 
     @patch("gim_backend.services.profile_service.get_or_create_profile")
-    def test_get_profile_under_100ms(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_get_profile_under_100ms(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(mock_user.id)
         mock_get_profile.return_value = mock_profile
 
@@ -109,9 +78,7 @@ class TestFeedPerformance:
     """GET /feed should respond under 200ms for routing and service layer."""
 
     @patch("gim_backend.services.feed_service.get_or_create_profile")
-    def test_feed_routing_under_200ms(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_feed_routing_under_200ms(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(mock_user.id)
         mock_get_profile.return_value = mock_profile
 
@@ -152,7 +119,7 @@ class TestVectorGenerationTiming:
         from gim_backend.services.profile_embedding_service import generate_intent_vector
 
         with patch("gim_backend.services.profile_embedding_service.embed_query") as mock_embed:
-            mock_embed.return_value = [0.01] * 768
+            mock_embed.return_value = [0.01] * 256
 
             start = time.perf_counter()
             result = await generate_intent_vector(
@@ -169,9 +136,9 @@ class TestVectorGenerationTiming:
         """Combined vector calculation should be under 1 second."""
         from gim_backend.services.profile_embedding_service import calculate_combined_vector
 
-        intent_vec = [0.01] * 768
-        resume_vec = [0.02] * 768
-        github_vec = [0.03] * 768
+        intent_vec = [0.01] * 256
+        resume_vec = [0.02] * 256
+        github_vec = [0.03] * 256
 
         iterations = 100
         times = []
@@ -189,7 +156,7 @@ class TestVectorGenerationTiming:
 
         avg_time = sum(times) / len(times)
 
-        assert avg_time < 0.01, f"Average combined vector time {avg_time*1000:.2f}ms exceeds 10ms"
+        assert avg_time < 0.01, f"Average combined vector time {avg_time * 1000:.2f}ms exceeds 10ms"
 
 
 class TestCloudTasksPerformance:
@@ -221,7 +188,7 @@ class TestCloudTasksPerformance:
 
         avg_time = sum(times) / len(times)
 
-        assert avg_time < 0.01, f"Average enqueue time {avg_time*1000:.2f}ms exceeds 10ms"
+        assert avg_time < 0.01, f"Average enqueue time {avg_time * 1000:.2f}ms exceeds 10ms"
 
         reset_client_for_testing()
 
@@ -240,7 +207,7 @@ class TestCloudTasksPerformance:
         _ = await client.cancel_user_tasks(user_id)
         elapsed = time.perf_counter() - start
 
-        assert elapsed < 0.01, f"Cancel tasks took {elapsed*1000:.2f}ms"
+        assert elapsed < 0.01, f"Cancel tasks took {elapsed * 1000:.2f}ms"
 
         reset_client_for_testing()
 
@@ -249,9 +216,7 @@ class TestOnboardingEndpointPerformance:
     """Tests onboarding endpoints respond quickly."""
 
     @patch("gim_backend.services.onboarding_service._get_or_create_profile")
-    def test_get_onboarding_under_100ms(
-        self, mock_get_profile, authenticated_client, mock_user
-    ):
+    def test_get_onboarding_under_100ms(self, mock_get_profile, authenticated_client, mock_user):
         mock_profile = create_mock_profile(mock_user.id)
         mock_get_profile.return_value = mock_profile
 
@@ -268,4 +233,3 @@ class TestOnboardingEndpointPerformance:
         avg_time = sum(times) / len(times)
 
         assert avg_time < 100, f"Average onboarding GET time {avg_time:.2f}ms exceeds 100ms"
-

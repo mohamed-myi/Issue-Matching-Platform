@@ -1,4 +1,5 @@
 """Integration tests for issue routes."""
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -38,6 +39,7 @@ def mock_session(mock_user):
 @pytest.fixture
 def authenticated_client(client, mock_user, mock_session):
     """Client with mocked authentication using dependency override."""
+
     def mock_require_auth():
         return (mock_user, mock_session)
 

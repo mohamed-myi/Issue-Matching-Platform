@@ -6,6 +6,7 @@ import pytest
 
 try:
     from testcontainers.postgres import PostgresContainer
+
     TESTCONTAINERS_AVAILABLE = True
 except ImportError:
     TESTCONTAINERS_AVAILABLE = False
@@ -18,14 +19,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from gim_backend.ingestion.embeddings import EmbeddedIssue
 from gim_backend.ingestion.gatherer import IssueData
 from gim_backend.ingestion.persistence import StreamingPersistence
-from gim_backend.ingestion.quality_gate import QScoreComponents
 from gim_backend.ingestion.scout import RepositoryData
 from gim_backend.ingestion.survival_score import calculate_survival_score, days_since
 
 # Skip entire module if testcontainers not installed
 pytestmark = pytest.mark.skipif(
-    not TESTCONTAINERS_AVAILABLE,
-    reason="testcontainers[postgres] not installed; requires Docker"
+    not TESTCONTAINERS_AVAILABLE, reason="testcontainers[postgres] not installed; requires Docker"
 )
 
 
@@ -95,7 +94,6 @@ def postgres_container():
 def sync_connection_url(postgres_container):
     """Synchronous connection URL for schema setup"""
     url = postgres_container.get_connection_url()
-    # Strip SQLAlchemy dialect prefix for plain PostgreSQL URL
     return url.replace("postgresql+psycopg2://", "postgresql://")
 
 
@@ -103,7 +101,6 @@ def sync_connection_url(postgres_container):
 def async_connection_url(postgres_container):
     """Async connection URL for test sessions"""
     url = postgres_container.get_connection_url()
-    # Strip SQLAlchemy dialect and convert to asyncpg
     url = url.replace("postgresql+psycopg2://", "postgresql://")
     return url.replace("postgresql://", "postgresql+asyncpg://")
 
@@ -113,8 +110,6 @@ def setup_schema(sync_connection_url):
     """Create schema and tables once per module using sync connection"""
     import psycopg2
 
-    # Parse URL for psycopg2
-    # Format: postgresql://user:password@host:port/dbname
     parts = sync_connection_url.replace("postgresql://", "").split("@")
     user_pass = parts[0].split(":")
     host_port_db = parts[1].split("/")
@@ -154,22 +149,11 @@ async def db_session(async_connection_url, setup_schema):
     async with async_session_factory() as session:
         yield session
 
-        # Cleanup: delete all rows after test
         await session.exec(text("DELETE FROM ingestion.issue"))
         await session.exec(text("DELETE FROM ingestion.repository"))
         await session.commit()
 
     await engine.dispose()
-
-
-@pytest.fixture
-def sample_q_components():
-    return QScoreComponents(
-        has_code=True,
-        has_headers=True,
-        tech_weight=0.5,
-        is_junk=False,
-    )
 
 
 @pytest.fixture
@@ -189,6 +173,7 @@ def make_repository():
             issue_count_open=issue_count_open,
             topics=["python", "api"],
         )
+
     return _make
 
 
@@ -213,11 +198,11 @@ def make_embedded_issue(sample_q_components):
             q_components=sample_q_components,
             state="open",
         )
-        # 256-dim embedding
         return EmbeddedIssue(
             issue=issue,
             embedding=[0.1] * 256,
         )
+
     return _make
 
 
@@ -234,7 +219,6 @@ class TestRepositoryUpsert:
 
         assert count == 1
 
-        # Verify in database
         result = await db_session.exec(
             text("SELECT full_name FROM ingestion.repository WHERE node_id = :id"),
             params={"id": "R_new"},
@@ -248,7 +232,6 @@ class TestRepositoryUpsert:
         """Re-inserting same node_id should UPDATE, not duplicate"""
         persistence = StreamingPersistence(db_session)
 
-        # First insert
         repo_v1 = make_repository(
             node_id="R_conflict",
             full_name="test/conflict-repo",
@@ -256,7 +239,6 @@ class TestRepositoryUpsert:
         )
         await persistence.upsert_repositories([repo_v1])
 
-        # Second insert with updated values
         repo_v2 = make_repository(
             node_id="R_conflict",
             full_name="test/conflict-repo",
@@ -266,7 +248,6 @@ class TestRepositoryUpsert:
 
         assert count == 1
 
-        # Verify single row with updated value
         result = await db_session.exec(
             text("SELECT stargazer_count FROM ingestion.repository WHERE node_id = :id"),
             params={"id": "R_conflict"},
@@ -279,18 +260,13 @@ class TestRepositoryUpsert:
     async def test_upsert_multiple_repositories(self, db_session, make_repository):
         """Batch upsert should handle multiple repos"""
         persistence = StreamingPersistence(db_session)
-        repos = [
-            make_repository(node_id=f"R_batch_{i}", full_name=f"batch/repo{i}")
-            for i in range(5)
-        ]
+        repos = [make_repository(node_id=f"R_batch_{i}", full_name=f"batch/repo{i}") for i in range(5)]
 
         count = await persistence.upsert_repositories(repos)
 
         assert count == 5
 
-        result = await db_session.exec(
-            text("SELECT COUNT(*) FROM ingestion.repository WHERE node_id LIKE 'R_batch_%'")
-        )
+        result = await db_session.exec(text("SELECT COUNT(*) FROM ingestion.repository WHERE node_id LIKE 'R_batch_%'"))
         assert result.scalar() == 5
 
 
@@ -302,7 +278,6 @@ class TestIssueUpsert:
         """Clean insert should create new issue row"""
         persistence = StreamingPersistence(db_session)
 
-        # insert repository first (FK constraint)
         repo = make_repository(node_id="R_for_issue")
         await persistence.upsert_repositories([repo])
 
@@ -332,7 +307,6 @@ class TestIssueUpsert:
         repo = make_repository(node_id="R_upsert")
         await persistence.upsert_repositories([repo])
 
-        # First insert
         issue_v1 = make_embedded_issue(
             node_id="I_upsert",
             repo_id="R_upsert",
@@ -345,7 +319,6 @@ class TestIssueUpsert:
 
         await persistence.persist_stream(stream_v1())
 
-        # Second insert with updated values
         issue_v2 = make_embedded_issue(
             node_id="I_upsert",
             repo_id="R_upsert",
@@ -360,7 +333,6 @@ class TestIssueUpsert:
 
         assert count == 1
 
-        # Verify single row with updated values
         result = await db_session.exec(
             text("SELECT title, q_score FROM ingestion.issue WHERE node_id = :id"),
             params={"id": "I_upsert"},
@@ -378,7 +350,6 @@ class TestIssueUpsert:
         repo = make_repository(node_id="R_survival")
         await persistence.upsert_repositories([repo])
 
-        # Issue with known q_score and age
         embedded = make_embedded_issue(
             node_id="I_survival",
             repo_id="R_survival",
@@ -397,15 +368,12 @@ class TestIssueUpsert:
         )
         stored_score = result.scalar()
 
-        # Verify score is positive and reasonable
         assert stored_score is not None
         assert stored_score > 0
 
-        # Calculate expected score for comparison
         days_old = days_since(embedded.issue.github_created_at)
         expected_score = calculate_survival_score(embedded.issue.q_score, days_old)
 
-        # Allow small tolerance due to timing
         assert abs(stored_score - expected_score) < 0.1
 
 
@@ -419,7 +387,6 @@ class TestBatchStreamPersistence:
         persistence = StreamingPersistence(db_session)
         issue_count = 100
 
-        # Setup: create repository
         repo = make_repository(node_id="R_batch_100")
         await persistence.upsert_repositories([repo])
 
@@ -435,10 +402,7 @@ class TestBatchStreamPersistence:
 
         assert count == issue_count
 
-        # Verify all in database
-        result = await db_session.exec(
-            text("SELECT COUNT(*) FROM ingestion.issue WHERE node_id LIKE 'I_batch_%'")
-        )
+        result = await db_session.exec(text("SELECT COUNT(*) FROM ingestion.issue WHERE node_id LIKE 'I_batch_%'"))
         assert result.scalar() == issue_count
 
     @pytest.mark.asyncio
@@ -450,7 +414,6 @@ class TestBatchStreamPersistence:
         repo = make_repository(node_id="R_survival_batch")
         await persistence.upsert_repositories([repo])
 
-        # Create issues with varying q_scores, same age
         async def issue_stream():
             for i, q in enumerate([0.5, 0.7, 0.9]):
                 yield make_embedded_issue(
@@ -472,12 +435,9 @@ class TestBatchStreamPersistence:
         )
         rows = result.all()
 
-        # Verify survival scores increase with q_score
         prev_survival = 0
         for row in rows:
-            assert row[2] > prev_survival, (
-                f"survival_score should increase with q_score: {row}"
-            )
+            assert row[2] > prev_survival, f"survival_score should increase with q_score: {row}"
             prev_survival = row[2]
 
 
