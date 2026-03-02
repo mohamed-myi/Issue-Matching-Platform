@@ -2,21 +2,46 @@
 Vector generation wrapper with retry support.
 Provides synchronous retry with exponential backoff for embedding operations.
 """
+
 import asyncio
 import logging
-from uuid import UUID
+from collections.abc import Awaitable, Callable
 
-from gim_database.models.profiles import UserProfile
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
-
-from gim_backend.services.embedding_service import embed_query
+from gim_backend.services.embedding_service import embed_document
 from gim_backend.services.profile_embedding_service import generate_intent_vector as _generate_intent_vector
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 BASE_BACKOFF_SECONDS = 1
+
+
+async def _generate_vector_with_retry(
+    *,
+    operation_label: str,
+    retry_label: str,
+    operation: Callable[[], Awaitable[list[float] | None]],
+    max_retries: int,
+) -> list[float] | None:
+    """Shared retry loop for vector generation wrappers."""
+    for attempt in range(max_retries):
+        try:
+            vector = await operation()
+            if vector is not None:
+                return vector
+
+            logger.warning(f"{operation_label} vector returned None on attempt {attempt + 1}/{max_retries}")
+
+        except Exception as e:
+            logger.warning(f"{operation_label} vector generation failed on attempt {attempt + 1}/{max_retries}: {e}")
+
+        if attempt < max_retries - 1:
+            backoff = BASE_BACKOFF_SECONDS * (2**attempt)
+            logger.info(f"Retrying {retry_label} vector in {backoff}s")
+            await asyncio.sleep(backoff)
+
+    logger.error(f"{operation_label} vector generation permanently failed after {max_retries} attempts")
+    return None
 
 
 async def generate_intent_vector_with_retry(
@@ -28,30 +53,12 @@ async def generate_intent_vector_with_retry(
     Generates intent vector with exponential backoff retry.
     Returns None if all retries fail; logs error but does not raise.
     """
-    for attempt in range(max_retries):
-        try:
-            vector = await _generate_intent_vector(stack_areas, text)
-            if vector is not None:
-                return vector
-
-            logger.warning(
-                f"Intent vector returned None on attempt {attempt + 1}/{max_retries}"
-            )
-
-        except Exception as e:
-            logger.warning(
-                f"Intent vector generation failed on attempt {attempt + 1}/{max_retries}: {e}"
-            )
-
-        if attempt < max_retries - 1:
-            backoff = BASE_BACKOFF_SECONDS * (2 ** attempt)
-            logger.info(f"Retrying intent vector in {backoff}s")
-            await asyncio.sleep(backoff)
-
-    logger.error(
-        f"Intent vector generation permanently failed after {max_retries} attempts"
+    return await _generate_vector_with_retry(
+        operation_label="Intent",
+        retry_label="intent",
+        operation=lambda: _generate_intent_vector(stack_areas, text),
+        max_retries=max_retries,
     )
-    return None
 
 
 async def generate_resume_vector_with_retry(
@@ -62,30 +69,12 @@ async def generate_resume_vector_with_retry(
     Generates resume vector with exponential backoff retry.
     Returns None if all retries fail; logs error but does not raise.
     """
-    for attempt in range(max_retries):
-        try:
-            vector = await embed_query(markdown_text)
-            if vector is not None:
-                return vector
-
-            logger.warning(
-                f"Resume vector returned None on attempt {attempt + 1}/{max_retries}"
-            )
-
-        except Exception as e:
-            logger.warning(
-                f"Resume vector generation failed on attempt {attempt + 1}/{max_retries}: {e}"
-            )
-
-        if attempt < max_retries - 1:
-            backoff = BASE_BACKOFF_SECONDS * (2 ** attempt)
-            logger.info(f"Retrying resume vector in {backoff}s")
-            await asyncio.sleep(backoff)
-
-    logger.error(
-        f"Resume vector generation permanently failed after {max_retries} attempts"
+    return await _generate_vector_with_retry(
+        operation_label="Resume",
+        retry_label="resume",
+        operation=lambda: embed_document(markdown_text),
+        max_retries=max_retries,
     )
-    return None
 
 
 async def generate_github_vector_with_retry(
@@ -96,48 +85,18 @@ async def generate_github_vector_with_retry(
     Generates GitHub vector with exponential backoff retry.
     Returns None if all retries fail; logs error but does not raise.
     """
-    for attempt in range(max_retries):
-        try:
-            vector = await embed_query(text)
-            if vector is not None:
-                return vector
-
-            logger.warning(
-                f"GitHub vector returned None on attempt {attempt + 1}/{max_retries}"
-            )
-
-        except Exception as e:
-            logger.warning(
-                f"GitHub vector generation failed on attempt {attempt + 1}/{max_retries}: {e}"
-            )
-
-        if attempt < max_retries - 1:
-            backoff = BASE_BACKOFF_SECONDS * (2 ** attempt)
-            logger.info(f"Retrying GitHub vector in {backoff}s")
-            await asyncio.sleep(backoff)
-
-    logger.error(
-        f"GitHub vector generation permanently failed after {max_retries} attempts"
+    return await _generate_vector_with_retry(
+        operation_label="GitHub",
+        retry_label="GitHub",
+        operation=lambda: embed_document(text),
+        max_retries=max_retries,
     )
-    return None
-
-
-async def check_profile_exists(
-    db: AsyncSession,
-    user_id: UUID,
-) -> bool:
-    """Checks if profile exists and has not been deleted during processing."""
-    statement = select(UserProfile.user_id).where(UserProfile.user_id == user_id)
-    result = await db.exec(statement)
-    return result.first() is not None
 
 
 __all__ = [
     "generate_intent_vector_with_retry",
     "generate_resume_vector_with_retry",
     "generate_github_vector_with_retry",
-    "check_profile_exists",
     "MAX_RETRIES",
     "BASE_BACKOFF_SECONDS",
 ]
-

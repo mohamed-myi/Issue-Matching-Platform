@@ -1,4 +1,5 @@
 """Unit tests for issue_service."""
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -149,12 +150,10 @@ class TestGetSimilarIssues:
         """Should return similar issues ordered by similarity score."""
         mock_db = AsyncMock()
 
-        # First call: get source issue with embedding
         mock_source_row = MagicMock()
         mock_source_row.node_id = "I_source"
         mock_source_row.embedding = [0.1] * 768
 
-        # Second call: get similar issues
         mock_similar_row1 = MagicMock()
         mock_similar_row1.node_id = "I_similar1"
         mock_similar_row1.title = "Similar Issue 1"
@@ -167,7 +166,6 @@ class TestGetSimilarIssues:
         mock_similar_row2.repo_name = "org/repo2"
         mock_similar_row2.similarity_score = 0.85
 
-        # Setup mock to return different results for different calls
         mock_result1 = MagicMock()
         mock_result1.fetchone.return_value = mock_source_row
 
@@ -193,7 +191,6 @@ class TestGetSimilarIssues:
         mock_source_row.node_id = "I_source"
         mock_source_row.embedding = [0.1] * 768
 
-        # Similar issues don't include source
         mock_similar = MagicMock()
         mock_similar.node_id = "I_other"
         mock_similar.title = "Other Issue"
@@ -226,7 +223,6 @@ class TestGetSimilarIssues:
         mock_result1 = MagicMock()
         mock_result1.fetchone.return_value = mock_source_row
 
-        # No open similar issues found
         mock_result2 = MagicMock()
         mock_result2.fetchall.return_value = []
 
@@ -255,7 +251,6 @@ class TestGetSimilarIssues:
 
         await get_similar_issues(mock_db, "I_source", limit=3)
 
-        # Verify the limit was passed in the query (params is 2nd positional arg)
         params = mock_db.execute.call_args_list[1][0][1]
         assert params["limit"] == 3
 
@@ -308,7 +303,6 @@ class TestGetSimilarIssues:
         """Closed source issue can still find open similar issues."""
         mock_db = AsyncMock()
 
-        # Source issue is closed but still has embedding
         mock_source_row = MagicMock()
         mock_source_row.node_id = "I_closed_source"
         mock_source_row.embedding = [0.1] * 768
@@ -329,7 +323,6 @@ class TestGetSimilarIssues:
 
         result = await get_similar_issues(mock_db, "I_closed_source")
 
-        # Should still return similar open issues
         assert result is not None
         assert len(result) == 1
         assert result[0].node_id == "I_open_similar"

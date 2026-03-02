@@ -1,4 +1,5 @@
 """Unit tests for bookmark service CRUD operations."""
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -7,22 +8,23 @@ import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from gim_backend.core.errors import BookmarkAlreadyExistsError
+from gim_backend.services.bookmark_note_service import (
+    NoteSchema,
+    create_note,
+    delete_note,
+    get_notes_count_for_bookmark,
+    list_notes,
+    update_note,
+)
 from gim_backend.services.bookmark_service import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     BookmarkSchema,
-    NoteSchema,
     create_bookmark,
-    create_note,
     delete_bookmark,
-    delete_note,
     get_bookmark,
-    get_bookmark_with_notes_count,
-    get_notes_count_for_bookmark,
     list_bookmarks,
-    list_notes,
     update_bookmark,
-    update_note,
 )
 
 
@@ -77,7 +79,6 @@ def sample_note(bookmark_id, note_id):
 
 
 class TestCreateBookmark:
-
     async def test_creates_bookmark_successfully(self, mock_db, user_id):
         mock_result = MagicMock()
         mock_result.first.return_value = None
@@ -119,13 +120,11 @@ class TestCreateBookmark:
 
 
 class TestListBookmarks:
-
     async def test_returns_bookmarks_with_pagination(self, mock_db, user_id, sample_bookmark):
         count_result = MagicMock()
         count_result.one.return_value = 5
 
         list_result = MagicMock()
-        # list_bookmarks now expects (bookmark, notes_count) tuple
         list_result.all.return_value = [(sample_bookmark, 2)]
 
         mock_db.exec.side_effect = [count_result, list_result]
@@ -209,10 +208,8 @@ class TestListBookmarks:
 
 
 class TestGetBookmark:
-
     async def test_returns_bookmark_if_owned(self, mock_db, user_id, sample_bookmark):
         mock_result = MagicMock()
-        # get_bookmark expects (bookmark, count)
         mock_result.first.return_value = (sample_bookmark, 5)
         mock_db.exec.return_value = mock_result
 
@@ -239,55 +236,11 @@ class TestGetBookmark:
 
         assert bookmark is None
 
-
-class TestGetBookmarkWithNotesCount:
-
-    async def test_returns_bookmark_and_count(self, mock_db, user_id, sample_bookmark):
-        # get_bookmark_with_notes_count delegates to get_bookmark
-        # which performs one query returning (bookmark, count)
-        mock_result = MagicMock()
-        mock_result.first.return_value = (sample_bookmark, 3)
-        mock_db.exec.return_value = mock_result
-
-        bookmark, count = await get_bookmark_with_notes_count(
-            db=mock_db,
-            user_id=user_id,
-            bookmark_id=sample_bookmark.id,
-        )
-
-        assert isinstance(bookmark, BookmarkSchema)
-        assert bookmark.id == sample_bookmark.id
-        assert count == 3
-
-    async def test_returns_none_and_zero_if_not_found(self, mock_db, user_id, bookmark_id):
-        bookmark_result = MagicMock()
-        bookmark_result.first.return_value = None
-        mock_db.exec.return_value = bookmark_result
-
-        bookmark, count = await get_bookmark_with_notes_count(
-            db=mock_db,
-            user_id=user_id,
-            bookmark_id=bookmark_id,
-        )
-
-        assert bookmark is None
-        assert count == 0
-
-
 class TestUpdateBookmark:
-
-        # update_bookmark needs:
     async def test_updates_is_resolved_status(self, mock_db, user_id, sample_bookmark):
-        # update_bookmark needs:
-        # 1. select to find ORM object
-        # 2. commit/refresh
-        # 3. get_bookmark (which does select with join)
-
-        # 1. Find ORM object
         find_result = MagicMock()
         find_result.first.return_value = sample_bookmark
 
-        # 3. get_bookmark call
         get_result = MagicMock()
         get_result.first.return_value = (sample_bookmark, 1)
 
@@ -321,9 +274,7 @@ class TestUpdateBookmark:
 
 
 class TestDeleteBookmark:
-
     async def test_deletes_bookmark_and_notes(self, mock_db, user_id, sample_bookmark):
-        # delete_bookmark does a check select first
         mock_result = MagicMock()
         mock_result.first.return_value = sample_bookmark
         mock_db.exec.return_value = mock_result
@@ -335,7 +286,6 @@ class TestDeleteBookmark:
         )
 
         assert result is True
-        # exec called for: check exist, delete notes
         assert mock_db.exec.call_count == 2
         assert mock_db.delete.called
         assert mock_db.commit.called
@@ -355,9 +305,7 @@ class TestDeleteBookmark:
 
 
 class TestCreateNote:
-
     async def test_creates_note_on_owned_bookmark(self, mock_db, user_id, sample_bookmark):
-        # create_note does ownership check first
         check_result = MagicMock()
         check_result.first.return_value = sample_bookmark
         mock_db.exec.return_value = check_result
@@ -396,9 +344,7 @@ class TestCreateNote:
 
 
 class TestListNotes:
-
     async def test_returns_notes_for_owned_bookmark(self, mock_db, user_id, sample_bookmark, sample_note):
-        # ownership check
         bookmark_result = MagicMock()
         bookmark_result.first.return_value = sample_bookmark
 
@@ -449,9 +395,7 @@ class TestListNotes:
 
 
 class TestUpdateNote:
-
     async def test_updates_note_content(self, mock_db, user_id, sample_note):
-        # ownership/get check
         mock_result = MagicMock()
         mock_result.first.return_value = sample_note
         mock_db.exec.return_value = mock_result
@@ -484,7 +428,6 @@ class TestUpdateNote:
 
 
 class TestDeleteNote:
-
     async def test_deletes_note_successfully(self, mock_db, user_id, sample_note):
         mock_result = MagicMock()
         mock_result.first.return_value = sample_note
@@ -515,7 +458,6 @@ class TestDeleteNote:
 
 
 class TestGetNotesCountForBookmark:
-
     async def test_returns_count(self, mock_db, bookmark_id):
         mock_result = MagicMock()
         mock_result.one.return_value = 5
@@ -530,10 +472,8 @@ class TestGetNotesCountForBookmark:
 
 
 class TestConstants:
-
     def test_default_page_size_is_20(self):
         assert DEFAULT_PAGE_SIZE == 20
 
     def test_max_page_size_is_50(self):
         assert MAX_PAGE_SIZE == 50
-

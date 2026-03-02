@@ -2,10 +2,12 @@
 Cloud Tasks service for async profile processing jobs.
 Wraps GCP Cloud Tasks API with mock mode for local development and testing.
 """
+
 import base64
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from gim_backend.core.config import get_settings
@@ -28,6 +30,7 @@ class CloudTasksClient:
         if not self._mock_mode:
             try:
                 from google.cloud import tasks_v2
+
                 self._client = tasks_v2.CloudTasksClient()
                 logger.info("Cloud Tasks client initialized for production")
             except ImportError:
@@ -45,6 +48,65 @@ class CloudTasksClient:
         task_id = f"{user_id}-{job_type}-{uuid4().hex[:8]}"
         return f"{self._get_queue_path()}/tasks/{task_id}"
 
+    def _cloud_tasks_service_account_email(self) -> str:
+        return self._settings.cloud_tasks_service_account_email or f"{self._settings.gcp_project}@appspot.gserviceaccount.com"
+
+    def _build_http_json_task(self, *, task_name: str, url: str, payload: dict[str, Any]):
+        from google.cloud import tasks_v2
+
+        return tasks_v2.Task(
+            name=task_name,
+            http_request=tasks_v2.HttpRequest(
+                http_method=tasks_v2.HttpMethod.POST,
+                url=url,
+                headers={"Content-Type": "application/json"},
+                body=json.dumps(payload).encode(),
+                oidc_token=tasks_v2.OidcToken(
+                    service_account_email=self._cloud_tasks_service_account_email(),
+                    audience=url,
+                ),
+            ),
+        )
+
+    async def _enqueue_http_json_task(
+        self,
+        *,
+        user_id: UUID,
+        job_type: str,
+        endpoint_url: str,
+        payload_fields: dict[str, Any],
+        log_label: str,
+    ) -> str:
+        job_id = str(uuid4())
+        task_name = self._create_task_name(user_id, job_type)
+        payload = {
+            "job_id": job_id,
+            "user_id": str(user_id),
+            **payload_fields,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+
+        if self._mock_mode:
+            self._mock_tasks[task_name] = {
+                "payload": payload,
+                "status": "pending",
+            }
+            logger.info(f"Mock task enqueued: {task_name} for {log_label}")
+            return job_id
+
+        task = self._build_http_json_task(
+            task_name=task_name,
+            url=endpoint_url,
+            payload=payload,
+        )
+        self._client.create_task(
+            parent=self._get_queue_path(),
+            task=task,
+        )
+
+        logger.info(f"Cloud Task created: {task_name} for {log_label}")
+        return job_id
+
     async def enqueue_resume_task(
         self,
         user_id: UUID,
@@ -57,48 +119,17 @@ class CloudTasksClient:
         File bytes are base64 encoded in the task payload.
         Returns job_id for tracking.
         """
-        job_id = str(uuid4())
-        task_name = self._create_task_name(user_id, "resume")
-
-        payload = {
-            "job_id": job_id,
-            "user_id": str(user_id),
-            "filename": filename,
-            "content_type": content_type,
-            "file_bytes_b64": base64.b64encode(file_bytes).decode("utf-8"),
-            "created_at": datetime.now(UTC).isoformat(),
-        }
-
-        if self._mock_mode:
-            self._mock_tasks[task_name] = {
-                "payload": payload,
-                "status": "pending",
-            }
-            logger.info(f"Mock task enqueued: {task_name} for resume parsing")
-            return job_id
-
-        from google.cloud import tasks_v2
-
-        task = tasks_v2.Task(
-            name=task_name,
-            http_request=tasks_v2.HttpRequest(
-                http_method=tasks_v2.HttpMethod.POST,
-                url=f"{self._settings.resume_worker_url}/tasks/resume/parse",
-                headers={"Content-Type": "application/json"},
-                body=json.dumps(payload).encode(),
-                oidc_token=tasks_v2.OidcToken(
-                    service_account_email=f"{self._settings.gcp_project}@appspot.gserviceaccount.com",
-                ),
-            ),
+        return await self._enqueue_http_json_task(
+            user_id=user_id,
+            job_type="resume",
+            endpoint_url=f"{self._settings.resume_worker_url}/tasks/resume/parse",
+            payload_fields={
+                "filename": filename,
+                "content_type": content_type,
+                "file_bytes_b64": base64.b64encode(file_bytes).decode("utf-8"),
+            },
+            log_label="resume parsing",
         )
-
-        self._client.create_task(
-            parent=self._get_queue_path(),
-            task=task,
-        )
-
-        logger.info(f"Cloud Task created: {task_name} for resume parsing")
-        return job_id
 
     async def enqueue_github_task(
         self,
@@ -108,45 +139,13 @@ class CloudTasksClient:
         Enqueues a GitHub profile fetch task.
         Returns job_id for tracking.
         """
-        job_id = str(uuid4())
-        task_name = self._create_task_name(user_id, "github")
-
-        payload = {
-            "job_id": job_id,
-            "user_id": str(user_id),
-            "created_at": datetime.now(UTC).isoformat(),
-        }
-
-        if self._mock_mode:
-            self._mock_tasks[task_name] = {
-                "payload": payload,
-                "status": "pending",
-            }
-            logger.info(f"Mock task enqueued: {task_name} for GitHub fetch")
-            return job_id
-
-        from google.cloud import tasks_v2
-
-        task = tasks_v2.Task(
-            name=task_name,
-            http_request=tasks_v2.HttpRequest(
-                http_method=tasks_v2.HttpMethod.POST,
-                url=f"{self._settings.embed_worker_url}/tasks/github/fetch",
-                headers={"Content-Type": "application/json"},
-                body=json.dumps(payload).encode(),
-                oidc_token=tasks_v2.OidcToken(
-                    service_account_email=f"{self._settings.gcp_project}@appspot.gserviceaccount.com",
-                ),
-            ),
+        return await self._enqueue_http_json_task(
+            user_id=user_id,
+            job_type="github",
+            endpoint_url=f"{self._settings.embed_worker_url}/tasks/github/fetch",
+            payload_fields={},
+            log_label="GitHub fetch",
         )
-
-        self._client.create_task(
-            parent=self._get_queue_path(),
-            task=task,
-        )
-
-        logger.info(f"Cloud Task created: {task_name} for GitHub fetch")
-        return job_id
 
     async def cancel_user_tasks(self, user_id: UUID) -> int:
         """
@@ -158,10 +157,7 @@ class CloudTasksClient:
         cancelled_count = 0
 
         if self._mock_mode:
-            tasks_to_remove = [
-                name for name in self._mock_tasks
-                if user_prefix in name
-            ]
+            tasks_to_remove = [name for name in self._mock_tasks if user_prefix in name]
             for task_name in tasks_to_remove:
                 del self._mock_tasks[task_name]
                 cancelled_count += 1
@@ -252,4 +248,3 @@ __all__ = [
     "cancel_user_tasks",
     "reset_client_for_testing",
 ]
-

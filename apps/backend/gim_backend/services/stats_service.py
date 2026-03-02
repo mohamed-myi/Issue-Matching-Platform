@@ -2,6 +2,7 @@
 Stats service for platform statistics.
 Provides aggregated counts for landing page trust signals.
 """
+
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,7 @@ STATS_CACHE_TTL = 3600  # 1 hour
 @dataclass
 class PlatformStats:
     """Platform statistics for landing page."""
+
     total_issues: int
     total_repos: int
     total_languages: int
@@ -52,7 +54,9 @@ async def get_platform_stats(db: AsyncSession) -> PlatformStats:
                         (cached.get(b"indexed_at") or cached.get("indexed_at", b"")).decode()
                         if isinstance(cached.get(b"indexed_at", cached.get("indexed_at")), bytes)
                         else cached.get("indexed_at", "")
-                    ) if cached.get(b"indexed_at") or cached.get("indexed_at") else None,
+                    )
+                    if cached.get(b"indexed_at") or cached.get("indexed_at")
+                    else None,
                 )
         except Exception as e:
             logger.warning(f"Stats cache read failed: {e}")
@@ -115,9 +119,7 @@ async def _query_stats(db: AsyncSession) -> PlatformStats:
     scrape_result = await db.execute(text(scrape_sql))
     indexed_at = scrape_result.scalar()
 
-    logger.info(
-        f"Stats queried: {total_issues} issues, {total_repos} repos, {total_languages} languages"
-    )
+    logger.info(f"Stats queried: {total_issues} issues, {total_repos} repos, {total_languages} languages")
 
     return PlatformStats(
         total_issues=total_issues,

@@ -6,10 +6,12 @@ from uuid import uuid4
 import pytest
 
 from gim_backend.services.recommendation_event_service import (
+    RECO_EVENTS_PROCESSING_QUEUE_KEY,
     RECO_EVENTS_QUEUE_KEY,
     RecommendationBatchContext,
     RecommendationEvent,
     enqueue_recommendation_events,
+    flush_recommendation_event_queue_once,
     get_recommendation_batch_context,
     store_recommendation_batch_context,
     validate_event_against_context,
@@ -39,6 +41,47 @@ class _FakeRedis:
 
     async def rpush(self, key: str, value: str) -> None:
         self.lists.setdefault(key, []).append(value)
+
+    async def lpush(self, key: str, value: str) -> None:
+        self.lists.setdefault(key, []).insert(0, value)
+
+    async def lrem(self, key: str, count: int, value: str) -> int:
+        items = self.lists.get(key, [])
+        removed = 0
+        i = 0
+        while i < len(items) and (count <= 0 or removed < count):
+            if items[i] == value:
+                items.pop(i)
+                removed += 1
+                continue
+            i += 1
+        return removed
+
+    async def lmove(self, source: str, destination: str, wherefrom: str = "LEFT", whereto: str = "RIGHT"):
+        src = self.lists.get(source, [])
+        if not src:
+            return None
+        if wherefrom.upper() == "LEFT":
+            value = src.pop(0)
+        else:
+            value = src.pop()
+        dest = self.lists.setdefault(destination, [])
+        if whereto.upper() == "LEFT":
+            dest.insert(0, value)
+        else:
+            dest.append(value)
+        return value
+
+    async def lpop(self, key: str, count: int | None = None):
+        items = self.lists.get(key, [])
+        if not items:
+            return None
+        if count is None:
+            return items.pop(0)
+        out = []
+        for _ in range(min(count, len(items))):
+            out.append(items.pop(0))
+        return out
 
 
 @pytest.mark.asyncio
@@ -127,3 +170,79 @@ async def test_enqueue_recommendation_events_dedupes_on_event_id():
     assert payload["issue_node_id"] == "x"
 
 
+@pytest.mark.asyncio
+async def test_flush_recommendation_events_moves_and_acks_processing_on_success():
+    fake = _FakeRedis()
+    event = {
+        "event_id": str(uuid4()),
+        "user_id": str(uuid4()),
+        "recommendation_batch_id": str(uuid4()),
+        "event_type": "impression",
+        "issue_node_id": "x",
+        "position": 1,
+        "surface": "feed",
+        "is_personalized": True,
+        "created_at": datetime.now(UTC).isoformat(),
+        "metadata": {"k": "v"},
+    }
+    await fake.rpush(RECO_EVENTS_QUEUE_KEY, json.dumps(event))
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=type("R", (), {"rowcount": 1})())
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+
+    with patch("gim_backend.services.recommendation_event_service.get_redis", new=AsyncMock(return_value=fake)):
+        result = await flush_recommendation_event_queue_once(db=mock_db, batch_size=10)
+
+    assert result == {"popped": 1, "inserted": 1}
+    assert fake.lists.get(RECO_EVENTS_QUEUE_KEY, []) == []
+    assert fake.lists.get(RECO_EVENTS_PROCESSING_QUEUE_KEY, []) == []
+
+
+@pytest.mark.asyncio
+async def test_flush_recommendation_events_requeues_on_db_failure():
+    fake = _FakeRedis()
+    raw1 = json.dumps(
+        {
+            "event_id": str(uuid4()),
+            "user_id": str(uuid4()),
+            "recommendation_batch_id": str(uuid4()),
+            "event_type": "impression",
+            "issue_node_id": "x",
+            "position": 1,
+            "surface": "feed",
+            "is_personalized": True,
+            "created_at": datetime.now(UTC).isoformat(),
+            "metadata": None,
+        }
+    )
+    raw2 = json.dumps(
+        {
+            "event_id": str(uuid4()),
+            "user_id": str(uuid4()),
+            "recommendation_batch_id": str(uuid4()),
+            "event_type": "click",
+            "issue_node_id": "y",
+            "position": 2,
+            "surface": "feed",
+            "is_personalized": True,
+            "created_at": datetime.now(UTC).isoformat(),
+            "metadata": None,
+        }
+    )
+    await fake.rpush(RECO_EVENTS_QUEUE_KEY, raw1)
+    await fake.rpush(RECO_EVENTS_QUEUE_KEY, raw2)
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=Exception("db down"))
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+
+    with patch("gim_backend.services.recommendation_event_service.get_redis", new=AsyncMock(return_value=fake)):
+        with pytest.raises(Exception, match="db down"):
+            await flush_recommendation_event_queue_once(db=mock_db, batch_size=10)
+
+    assert fake.lists.get(RECO_EVENTS_QUEUE_KEY, []) == [raw1, raw2]
+    assert fake.lists.get(RECO_EVENTS_PROCESSING_QUEUE_KEY, []) == []
+    assert mock_db.rollback.await_count == 1

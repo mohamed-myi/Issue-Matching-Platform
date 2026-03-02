@@ -7,13 +7,14 @@ For async processing via Cloud Tasks:
   - execute_github_fetch() does the actual fetching and embedding (called by worker)
   - fetch_github_profile() is the synchronous version for testing or fallback
 """
+
 import logging
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
 from gim_database.models.profiles import UserProfile
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from gim_backend.ingestion.github_client import (
@@ -27,7 +28,13 @@ from gim_backend.services.linked_account_service import (
     get_valid_access_token,
 )
 from gim_backend.services.onboarding_service import mark_onboarding_in_progress
-from gim_backend.services.profile_embedding_service import calculate_combined_vector
+from gim_backend.services.profile_access import get_or_create_profile_record as _get_or_create_profile
+from gim_backend.services.profile_embedding_service import (
+    calculate_combined_vector,
+    finalize_profile_recalculation,
+    mark_profile_recalculation_started,
+    reset_profile_recalculation,
+)
 from gim_backend.services.vector_generation import generate_github_vector_with_retry
 
 logger = logging.getLogger(__name__)
@@ -74,31 +81,6 @@ query ContributedRepos($login: String!, $first: Int!) {
 """
 
 
-async def _get_or_create_profile(
-    db: AsyncSession,
-    user_id: UUID,
-) -> UserProfile:
-    """Local version to avoid circular import with profile_service."""
-    statement = select(UserProfile).where(UserProfile.user_id == user_id)
-    result = await db.exec(statement)
-    profile = result.first()
-
-    if profile is not None:
-        return profile
-
-    profile = UserProfile(
-        user_id=user_id,
-        min_heat_threshold=0.6,
-        is_calculating=False,
-        onboarding_status="not_started",
-    )
-
-    db.add(profile)
-    await db.commit()
-    await db.refresh(profile)
-    return profile
-
-
 async def _fetch_starred_repos(
     client: GitHubGraphQLClient,
     username: str,
@@ -137,10 +119,7 @@ async def _fetch_starred_repos(
             break
         cursor = page_info.get("endCursor")
 
-    return (
-        data.get("user", {}).get("starredRepositories", {}).get("totalCount", len(repos)),
-        repos[:max_repos]
-    )
+    return (data.get("user", {}).get("starredRepositories", {}).get("totalCount", len(repos)), repos[:max_repos])
 
 
 async def _fetch_contributed_repos(
@@ -375,16 +354,19 @@ async def initiate_github_fetch(
             "No GitHub account connected. Please connect GitHub first at /auth/connect/github"
         )
     except LinkedAccountRevokedError:
-        raise GitHubNotConnectedError(
-            "Please reconnect your GitHub account"
-        )
+        raise GitHubNotConnectedError("Please reconnect your GitHub account")
 
     await mark_onboarding_in_progress(db, profile)
 
-    profile.is_calculating = True
+    mark_profile_recalculation_started(profile)
     await db.commit()
 
-    job_id = await enqueue_github_task(user_id)
+    try:
+        job_id = await enqueue_github_task(user_id)
+    except Exception:
+        reset_profile_recalculation(profile)
+        await db.commit()
+        raise
 
     logger.info(f"GitHub fetch initiated for user {user_id}, job_id {job_id}")
 
@@ -393,6 +375,162 @@ async def initiate_github_fetch(
         "status": "processing",
         "message": "GitHub profile fetch started. Processing in background.",
     }
+
+
+@dataclass
+class GitHubFetchPipelineData:
+    username: str
+    starred_count: int
+    contributed_count: int
+    languages: list[str]
+    topics: list[str]
+    descriptions: list[str]
+    minimal_warning: str | None
+    starred_repo_names: list[str]
+    contributed_repo_names: list[str]
+
+
+async def _reset_github_recalculation_and_commit(
+    db: AsyncSession,
+    profile: UserProfile,
+    *,
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    reset_profile_recalculation(profile)
+    await db.commit()
+
+
+def _build_github_profile_response(profile: UserProfile, data: GitHubFetchPipelineData) -> dict:
+    return {
+        "status": "ready",
+        "username": data.username,
+        "starred_count": data.starred_count,
+        "contributed_repos": data.contributed_count,
+        "languages": profile.github_languages or [],
+        "topics": profile.github_topics or [],
+        "vector_status": "ready" if profile.github_vector else None,
+        "fetched_at": profile.github_fetched_at.isoformat() if profile.github_fetched_at else None,
+        "minimal_data_warning": data.minimal_warning,
+    }
+
+
+def _store_github_profile_data(profile: UserProfile, data: GitHubFetchPipelineData) -> None:
+    profile.github_username = data.username
+    profile.github_languages = data.languages[:20] if data.languages else []
+    profile.github_topics = data.topics[:30] if data.topics else []
+    profile.github_data = {
+        "starred_count": data.starred_count,
+        "contributed_count": data.contributed_count,
+        "starred_repos": data.starred_repo_names,
+        "contributed_repos": data.contributed_repo_names,
+    }
+    profile.github_fetched_at = datetime.now(UTC)
+
+
+async def _fetch_github_pipeline_data(
+    db: AsyncSession,
+    profile: UserProfile,
+    user_id: UUID,
+    *,
+    cleanup_on_connect_error: bool,
+    missing_account_message: str | None,
+    revoked_account_message: str | None,
+    auth_error_message: str,
+    username_missing_message: str,
+) -> GitHubFetchPipelineData:
+    try:
+        access_token = await get_valid_access_token(db, user_id, "github")
+    except LinkedAccountNotFoundError as exc:
+        await _reset_github_recalculation_and_commit(db, profile, enabled=cleanup_on_connect_error)
+        raise GitHubNotConnectedError(missing_account_message or str(exc)) from exc
+    except LinkedAccountRevokedError as exc:
+        await _reset_github_recalculation_and_commit(db, profile, enabled=cleanup_on_connect_error)
+        raise GitHubNotConnectedError(revoked_account_message or str(exc)) from exc
+
+    async with GitHubGraphQLClient(access_token) as client:
+        try:
+            username = await client.verify_authentication()
+        except GitHubAuthError as exc:
+            await _reset_github_recalculation_and_commit(db, profile, enabled=cleanup_on_connect_error)
+            raise GitHubNotConnectedError(auth_error_message) from exc
+
+        if not username:
+            await _reset_github_recalculation_and_commit(db, profile, enabled=cleanup_on_connect_error)
+            raise GitHubNotConnectedError(username_missing_message)
+
+        starred_count, starred_repos = await _fetch_starred_repos(client, username)
+        contributed_count, contributed_repos = await _fetch_contributed_repos(client, username)
+
+    languages = extract_languages(starred_repos, contributed_repos)
+    topics = extract_topics(starred_repos, contributed_repos)
+
+    descriptions = _extract_descriptions_from_repos(contributed_repos, max_count=3)
+    descriptions.extend(_extract_descriptions_from_repos(starred_repos, max_count=2))
+
+    return GitHubFetchPipelineData(
+        username=username,
+        starred_count=starred_count,
+        contributed_count=contributed_count,
+        languages=languages,
+        topics=topics,
+        descriptions=descriptions,
+        minimal_warning=check_minimal_data(starred_count, contributed_count),
+        starred_repo_names=[r.get("name") for r in starred_repos[:20] if r],
+        contributed_repo_names=[r.get("name") for r in contributed_repos[:20] if r],
+    )
+
+
+async def _run_github_fetch_pipeline(
+    db: AsyncSession,
+    profile: UserProfile,
+    user_id: UUID,
+    *,
+    mark_onboarding: bool,
+    start_recalculation: bool,
+    cleanup_on_connect_error: bool,
+    missing_account_message: str | None,
+    revoked_account_message: str | None,
+    auth_error_message: str,
+    username_missing_message: str,
+) -> dict:
+    if mark_onboarding:
+        await mark_onboarding_in_progress(db, profile)
+
+    data = await _fetch_github_pipeline_data(
+        db,
+        profile,
+        user_id,
+        cleanup_on_connect_error=cleanup_on_connect_error,
+        missing_account_message=missing_account_message,
+        revoked_account_message=revoked_account_message,
+        auth_error_message=auth_error_message,
+        username_missing_message=username_missing_message,
+    )
+
+    _store_github_profile_data(profile, data)
+    if start_recalculation:
+        mark_profile_recalculation_started(profile)
+    await db.commit()
+
+    try:
+        logger.info(f"Generating GitHub vector for user {user_id}")
+        github_vector = await generate_github_vector(data.languages, data.topics, data.descriptions)
+        profile.github_vector = github_vector
+
+        await finalize_profile_recalculation(
+            profile,
+            calculate_combined_vector_fn=calculate_combined_vector,
+        )
+        logger.info(f"GitHub vector generated for user {user_id}")
+    finally:
+        if profile.is_calculating:
+            reset_profile_recalculation(profile)
+
+    await db.commit()
+    await db.refresh(profile)
+    return _build_github_profile_response(profile, data)
 
 
 async def execute_github_fetch(
@@ -404,79 +542,18 @@ async def execute_github_fetch(
     Does not check refresh rate limit (already validated in initiate).
     """
     profile = await _get_or_create_profile(db, user_id)
-
-    try:
-        access_token = await get_valid_access_token(db, user_id, "github")
-    except (LinkedAccountNotFoundError, LinkedAccountRevokedError) as e:
-        profile.is_calculating = False
-        await db.commit()
-        raise GitHubNotConnectedError(str(e))
-
-    async with GitHubGraphQLClient(access_token) as client:
-        try:
-            username = await client.verify_authentication()
-        except GitHubAuthError:
-            profile.is_calculating = False
-            await db.commit()
-            raise GitHubNotConnectedError("Please reconnect your GitHub account")
-
-        if not username:
-            profile.is_calculating = False
-            await db.commit()
-            raise GitHubNotConnectedError("Could not retrieve GitHub username")
-
-        starred_count, starred_repos = await _fetch_starred_repos(client, username)
-        contributed_count, contributed_repos = await _fetch_contributed_repos(client, username)
-
-    languages = extract_languages(starred_repos, contributed_repos)
-    topics = extract_topics(starred_repos, contributed_repos)
-
-    descriptions = _extract_descriptions_from_repos(contributed_repos, max_count=3)
-    descriptions.extend(_extract_descriptions_from_repos(starred_repos, max_count=2))
-
-    minimal_warning = check_minimal_data(starred_count, contributed_count)
-
-    profile.github_username = username
-    profile.github_languages = languages[:20] if languages else []
-    profile.github_topics = topics[:30] if topics else []
-    profile.github_data = {
-        "starred_count": starred_count,
-        "contributed_count": contributed_count,
-        "starred_repos": [r.get("name") for r in starred_repos[:20] if r],
-        "contributed_repos": [r.get("name") for r in contributed_repos[:20] if r],
-    }
-    profile.github_fetched_at = datetime.now(UTC)
-    await db.commit()
-
-    try:
-        logger.info(f"Generating GitHub vector for user {user_id}")
-        github_vector = await generate_github_vector(languages, topics, descriptions)
-        profile.github_vector = github_vector
-
-        combined = await calculate_combined_vector(
-            intent_vector=profile.intent_vector,
-            resume_vector=profile.resume_vector,
-            github_vector=github_vector,
-        )
-        profile.combined_vector = combined
-        logger.info(f"GitHub vector generated for user {user_id}")
-    finally:
-        profile.is_calculating = False
-
-    await db.commit()
-    await db.refresh(profile)
-
-    return {
-        "status": "ready",
-        "username": username,
-        "starred_count": starred_count,
-        "contributed_repos": contributed_count,
-        "languages": profile.github_languages or [],
-        "topics": profile.github_topics or [],
-        "vector_status": "ready" if profile.github_vector else None,
-        "fetched_at": profile.github_fetched_at.isoformat() if profile.github_fetched_at else None,
-        "minimal_data_warning": minimal_warning,
-    }
+    return await _run_github_fetch_pipeline(
+        db,
+        profile,
+        user_id,
+        mark_onboarding=False,
+        start_recalculation=False,
+        cleanup_on_connect_error=True,
+        missing_account_message=None,
+        revoked_account_message=None,
+        auth_error_message="Please reconnect your GitHub account",
+        username_missing_message="Could not retrieve GitHub username",
+    )
 
 
 async def fetch_github_profile(
@@ -495,91 +572,18 @@ async def fetch_github_profile(
         if seconds_remaining is not None:
             raise RefreshRateLimitError(seconds_remaining)
 
-    # Get GitHub access token from linked accounts
-    try:
-        access_token = await get_valid_access_token(db, user_id, "github")
-    except LinkedAccountNotFoundError:
-        raise GitHubNotConnectedError(
-            "No GitHub account connected. Please connect GitHub first at /auth/connect/github"
-        )
-    except LinkedAccountRevokedError:
-        raise GitHubNotConnectedError(
-            "Please reconnect your GitHub account"
-        )
-
-    async with GitHubGraphQLClient(access_token) as client:
-        try:
-            username = await client.verify_authentication()
-        except GitHubAuthError:
-            raise GitHubNotConnectedError(
-                "Please reconnect your GitHub account"
-            )
-
-        if not username:
-            raise GitHubNotConnectedError(
-                "Could not retrieve GitHub username. Please reconnect."
-            )
-
-        # Fetch starred and contributed repos
-        starred_count, starred_repos = await _fetch_starred_repos(client, username)
-        contributed_count, contributed_repos = await _fetch_contributed_repos(client, username)
-
-    # Extract languages and topics
-    languages = extract_languages(starred_repos, contributed_repos)
-    topics = extract_topics(starred_repos, contributed_repos)
-
-    descriptions = _extract_descriptions_from_repos(contributed_repos, max_count=3)
-    descriptions.extend(_extract_descriptions_from_repos(starred_repos, max_count=2))
-
-    minimal_warning = check_minimal_data(starred_count, contributed_count)
-
-    await mark_onboarding_in_progress(db, profile)
-
-    # Update profile with fetched data
-    profile.github_username = username
-    profile.github_languages = languages[:20] if languages else []
-    profile.github_topics = topics[:30] if topics else []
-    profile.github_data = {
-        "starred_count": starred_count,
-        "contributed_count": contributed_count,
-        "starred_repos": [r.get("name") for r in starred_repos[:20] if r],
-        "contributed_repos": [r.get("name") for r in contributed_repos[:20] if r],
-    }
-    profile.github_fetched_at = datetime.now(UTC)
-    profile.is_calculating = True
-    await db.commit()
-
-    # Generate GitHub vector
-    try:
-        logger.info(f"Generating GitHub vector for user {user_id}")
-        github_vector = await generate_github_vector(languages, topics, descriptions)
-        profile.github_vector = github_vector
-
-        # Recalculate combined vector
-        combined = await calculate_combined_vector(
-            intent_vector=profile.intent_vector,
-            resume_vector=profile.resume_vector,
-            github_vector=github_vector,
-        )
-        profile.combined_vector = combined
-        logger.info(f"GitHub vector generated for user {user_id}")
-    finally:
-        profile.is_calculating = False
-
-    await db.commit()
-    await db.refresh(profile)
-
-    return {
-        "status": "ready",
-        "username": username,
-        "starred_count": starred_count,
-        "contributed_repos": contributed_count,
-        "languages": profile.github_languages or [],
-        "topics": profile.github_topics or [],
-        "vector_status": "ready" if profile.github_vector else None,
-        "fetched_at": profile.github_fetched_at.isoformat() if profile.github_fetched_at else None,
-        "minimal_data_warning": minimal_warning,
-    }
+    return await _run_github_fetch_pipeline(
+        db,
+        profile,
+        user_id,
+        mark_onboarding=True,
+        start_recalculation=True,
+        cleanup_on_connect_error=False,
+        missing_account_message="No GitHub account connected. Please connect GitHub first at /auth/connect/github",
+        revoked_account_message="Please reconnect your GitHub account",
+        auth_error_message="Please reconnect your GitHub account",
+        username_missing_message="Could not retrieve GitHub username. Please reconnect.",
+    )
 
 
 async def get_github_data(
@@ -616,7 +620,7 @@ async def delete_github(
     if profile.github_username is None:
         return False
 
-    profile.is_calculating = True
+    mark_profile_recalculation_started(profile)
     await db.commit()
 
     try:
@@ -628,14 +632,13 @@ async def delete_github(
         profile.github_vector = None
 
         logger.info(f"Recalculating combined vector after GitHub deletion for user {user_id}")
-        combined = await calculate_combined_vector(
-            intent_vector=profile.intent_vector,
-            resume_vector=profile.resume_vector,
-            github_vector=None,
+        await finalize_profile_recalculation(
+            profile,
+            calculate_combined_vector_fn=calculate_combined_vector,
         )
-        profile.combined_vector = combined
     finally:
-        profile.is_calculating = False
+        if profile.is_calculating:
+            reset_profile_recalculation(profile)
 
     await db.commit()
     await db.refresh(profile)
@@ -656,4 +659,3 @@ __all__ = [
     "get_github_data",
     "delete_github",
 ]
-

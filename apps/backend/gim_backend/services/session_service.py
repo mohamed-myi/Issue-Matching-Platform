@@ -23,19 +23,15 @@ def _utc_now() -> datetime:
 
 class ExistingAccountError(Exception):
     """Contains original_provider for UI messaging"""
+
     def __init__(self, original_provider: str):
         self.original_provider = original_provider
-        super().__init__(
-            f"Account exists, Please sign in with {original_provider}"
-        )
+        super().__init__(f"Account exists, Please sign in with {original_provider}")
 
 
 class ProviderConflictError(Exception):
     """Provider ID already associated with different user"""
-    pass
 
-
-class SessionNotFoundError(Exception):
     pass
 
 
@@ -95,23 +91,15 @@ async def link_provider(
 ) -> User:
     """For authenticated account linking only; raises ProviderConflictError if provider_id linked to different user"""
     if provider == OAuthProvider.GITHUB:
-        statement = select(User).where(
-            User.github_node_id == profile.provider_id,
-            User.id != user.id
-        )
+        statement = select(User).where(User.github_node_id == profile.provider_id, User.id != user.id)
     else:
-        statement = select(User).where(
-            User.google_id == profile.provider_id,
-            User.id != user.id
-        )
+        statement = select(User).where(User.google_id == profile.provider_id, User.id != user.id)
 
     result = await db.exec(statement)
     conflict_user = result.first()
 
     if conflict_user is not None:
-        raise ProviderConflictError(
-            f"{provider.value} account is already linked to another user"
-        )
+        raise ProviderConflictError(f"{provider.value} account is already linked to another user")
 
     if provider == OAuthProvider.GITHUB:
         user.github_node_id = profile.provider_id
@@ -249,6 +237,7 @@ async def invalidate_all_sessions(
 
 class SessionInfo(BaseModel):
     """Sanitized session metadata for API response"""
+
     id: str
     fingerprint_partial: str
     created_at: datetime
@@ -271,10 +260,14 @@ async def list_sessions(
     """Returns all active sessions for user with sanitized metadata"""
     now = _utc_now()
 
-    statement = select(Session).where(
-        Session.user_id == user_id,
-        Session.expires_at > now,
-    ).order_by(Session.last_active_at.desc())
+    statement = (
+        select(Session)
+        .where(
+            Session.user_id == user_id,
+            Session.expires_at > now,
+        )
+        .order_by(Session.last_active_at.desc())
+    )
 
     result = await db.exec(statement)
     sessions = result.all()
@@ -300,9 +293,13 @@ async def count_sessions(
     """Returns count of active sessions for user"""
     now = _utc_now()
 
-    statement = select(func.count()).select_from(Session).where(
-        Session.user_id == user_id,
-        Session.expires_at > now,
+    statement = (
+        select(func.count())
+        .select_from(Session)
+        .where(
+            Session.user_id == user_id,
+            Session.expires_at > now,
+        )
     )
 
     result = await db.exec(statement)
@@ -339,54 +336,38 @@ async def delete_user_cascade(
     total_rows = 0
 
     async with db.begin():
-        # Delete personal_notes via bookmark subquery
-        bookmark_ids_subq = select(BookmarkedIssue.id).where(
-            BookmarkedIssue.user_id == user_id
-        ).scalar_subquery()
+        bookmark_ids_subq = select(BookmarkedIssue.id).where(BookmarkedIssue.user_id == user_id).scalar_subquery()
 
-        notes_stmt = delete(PersonalNote).where(
-            PersonalNote.bookmark_id.in_(bookmark_ids_subq)
-        )
+        notes_stmt = delete(PersonalNote).where(PersonalNote.bookmark_id.in_(bookmark_ids_subq))
         notes_result = await db.exec(notes_stmt)
         if notes_result.rowcount > 0:
             tables_affected.append("personal_notes")
             total_rows += notes_result.rowcount
 
-        # Delete bookmarked_issues
-        bookmarks_stmt = delete(BookmarkedIssue).where(
-            BookmarkedIssue.user_id == user_id
-        )
+        bookmarks_stmt = delete(BookmarkedIssue).where(BookmarkedIssue.user_id == user_id)
         bookmarks_result = await db.exec(bookmarks_stmt)
         if bookmarks_result.rowcount > 0:
             tables_affected.append("bookmarked_issues")
             total_rows += bookmarks_result.rowcount
 
-        # Delete linked_accounts
-        accounts_stmt = delete(LinkedAccount).where(
-            LinkedAccount.user_id == user_id
-        )
+        accounts_stmt = delete(LinkedAccount).where(LinkedAccount.user_id == user_id)
         accounts_result = await db.exec(accounts_stmt)
         if accounts_result.rowcount > 0:
             tables_affected.append("linked_accounts")
             total_rows += accounts_result.rowcount
 
-        # Delete user_profiles
-        profiles_stmt = delete(UserProfileModel).where(
-            UserProfileModel.user_id == user_id
-        )
+        profiles_stmt = delete(UserProfileModel).where(UserProfileModel.user_id == user_id)
         profiles_result = await db.exec(profiles_stmt)
         if profiles_result.rowcount > 0:
             tables_affected.append("user_profiles")
             total_rows += profiles_result.rowcount
 
-        # Delete sessions
         sessions_stmt = delete(Session).where(Session.user_id == user_id)
         sessions_result = await db.exec(sessions_stmt)
         if sessions_result.rowcount > 0:
             tables_affected.append("sessions")
             total_rows += sessions_result.rowcount
 
-        # Delete user
         user_stmt = delete(User).where(User.id == user_id)
         user_result = await db.exec(user_stmt)
         if user_result.rowcount > 0:

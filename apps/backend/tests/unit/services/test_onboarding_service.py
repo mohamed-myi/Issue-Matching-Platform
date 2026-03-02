@@ -1,4 +1,5 @@
 """Unit tests for onboarding service step tracking and state transitions."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -545,4 +546,3 @@ class TestAnyOrderCompletion:
         result = _can_complete(mock_profile)
 
         assert result is True
-

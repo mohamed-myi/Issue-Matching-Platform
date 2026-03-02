@@ -1,15 +1,16 @@
 """
 Onboarding service for tracking user onboarding progress and state transitions.
 """
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
 from gim_database.models.profiles import UserProfile
-from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from gim_backend.core.errors import CannotCompleteOnboardingError, OnboardingAlreadyCompletedError
+from gim_backend.services.profile_access import get_or_create_profile_record as _get_or_create_profile
 
 ALL_STEPS = ["welcome", "intent", "github", "resume", "preferences"]
 
@@ -26,31 +27,6 @@ class OnboardingState:
 class OnboardingStartResult:
     state: OnboardingState
     action: str
-
-
-async def _get_or_create_profile(
-    db: AsyncSession,
-    user_id: UUID,
-) -> UserProfile:
-    """Local version to avoid circular import with profile_service."""
-    statement = select(UserProfile).where(UserProfile.user_id == user_id)
-    result = await db.exec(statement)
-    profile = result.first()
-
-    if profile is not None:
-        return profile
-
-    profile = UserProfile(
-        user_id=user_id,
-        min_heat_threshold=0.6,
-        is_calculating=False,
-        onboarding_status="not_started",
-    )
-
-    db.add(profile)
-    await db.commit()
-    await db.refresh(profile)
-    return profile
 
 
 def _get_completed_steps(profile: UserProfile) -> list[str]:
@@ -80,11 +56,7 @@ def _get_available_steps(completed_steps: list[str]) -> list[str]:
 
 def _can_complete(profile: UserProfile) -> bool:
     """Skip is handled separately and does not require sources."""
-    return (
-        profile.intent_text is not None or
-        profile.resume_skills is not None or
-        profile.github_username is not None
-    )
+    return profile.intent_text is not None or profile.resume_skills is not None or profile.github_username is not None
 
 
 def compute_onboarding_state(profile: UserProfile) -> OnboardingState:
@@ -116,14 +88,10 @@ async def complete_onboarding(
     profile = await _get_or_create_profile(db, user_id)
 
     if profile.onboarding_status in ("completed", "skipped"):
-        raise OnboardingAlreadyCompletedError(
-            f"Onboarding already {profile.onboarding_status}"
-        )
+        raise OnboardingAlreadyCompletedError(f"Onboarding already {profile.onboarding_status}")
 
     if not _can_complete(profile):
-        raise CannotCompleteOnboardingError(
-            "Cannot complete onboarding without at least one profile source"
-        )
+        raise CannotCompleteOnboardingError("Cannot complete onboarding without at least one profile source")
 
     profile.onboarding_status = "completed"
     profile.onboarding_completed_at = datetime.now(UTC)
@@ -142,9 +110,7 @@ async def skip_onboarding(
     profile = await _get_or_create_profile(db, user_id)
 
     if profile.onboarding_status in ("completed", "skipped"):
-        raise OnboardingAlreadyCompletedError(
-            f"Onboarding already {profile.onboarding_status}"
-        )
+        raise OnboardingAlreadyCompletedError(f"Onboarding already {profile.onboarding_status}")
 
     profile.onboarding_status = "skipped"
     profile.onboarding_completed_at = datetime.now(UTC)

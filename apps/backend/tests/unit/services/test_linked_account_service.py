@@ -3,27 +3,22 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-# Import all models to ensure SQLAlchemy mappers are configured
-# before LinkedAccount is used (models have inter-dependent relationships)
 import pytest
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 @pytest.fixture(autouse=True)
-def mock_settings():
-    # Generate a valid Fernet key for testing
+def mock_settings(settings_env_override):
     from cryptography.fernet import Fernet
+
     test_fernet_key = Fernet.generate_key().decode()
 
-    with patch.dict(os.environ, {
-        "FERNET_KEY": test_fernet_key,
-    }):
-        from gim_backend.core.config import get_settings
-        get_settings.cache_clear()
+    with settings_env_override(
+        {
+            "FERNET_KEY": test_fernet_key,
+        },
+    ):
         yield
-        get_settings.cache_clear()
-
-
 
 
 @pytest.fixture
@@ -140,7 +135,7 @@ class TestStoreLinkedAccount:
 
         assert result == existing
         assert existing.access_token != encrypt_token("old_token")
-        mock_db.add.assert_not_called()  # Updated existing, didnt add new
+        mock_db.add.assert_not_called()
 
     async def test_reactivates_revoked_account(self, mock_db):
         """Reconnecting clears revoked_at timestamp"""
@@ -280,7 +275,6 @@ class TestListLinkedAccounts:
 
             await list_linked_accounts(mock_db, uuid4())
 
-            # First where for user_id, second where for revoked_at is None
             mock_chain.where.assert_called_once()
 
     async def test_includes_revoked_when_requested(self, mock_db):
@@ -297,6 +291,4 @@ class TestListLinkedAccounts:
 
             await list_linked_accounts(mock_db, uuid4(), include_revoked=True)
 
-            # Only one where clause (user_id)
             mock_chain.where.assert_not_called()
-

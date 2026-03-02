@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 @dataclass
 class RiskWeights:
     """Configurable weights for risk assessment; higher = more suspicious"""
+
     fingerprint_mismatch: float = 0.1
     os_mismatch: float = 0.3
     ua_mismatch: float = 0.2
@@ -28,6 +29,7 @@ DEFAULT_WEIGHTS = RiskWeights()
 @dataclass
 class RiskResult:
     """Outcome of risk assessment with recommended actions"""
+
     score: float
     should_reauthenticate: bool
     should_log: bool
@@ -104,10 +106,7 @@ def assess_session_risk(
     should_reauthenticate = score >= REAUTHENTICATE_THRESHOLD
 
     # Only log medium-risk if throttle window has passed
-    should_log = (
-        MEDIUM_RISK_THRESHOLD <= score < REAUTHENTICATE_THRESHOLD and
-        _should_log_deviation(session)
-    )
+    should_log = MEDIUM_RISK_THRESHOLD <= score < REAUTHENTICATE_THRESHOLD and _should_log_deviation(session)
 
     return RiskResult(
         score=score,

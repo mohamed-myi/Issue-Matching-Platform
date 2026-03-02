@@ -2,6 +2,7 @@
 Issue service for issue discovery and detail endpoints.
 All queries filter open state by default for user-facing endpoints.
 """
+
 import logging
 from datetime import datetime
 
@@ -19,6 +20,7 @@ MAX_SIMILAR_LIMIT = 10
 
 class IssueDetail(BaseModel):
     """Full issue detail with repository metadata."""
+
     node_id: str
     title: str
     body: str
@@ -34,6 +36,7 @@ class IssueDetail(BaseModel):
 
 class SimilarIssue(BaseModel):
     """Similar issue with similarity score."""
+
     node_id: str
     title: str
     repo_name: str

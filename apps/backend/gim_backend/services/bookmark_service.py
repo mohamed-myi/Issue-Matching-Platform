@@ -1,6 +1,11 @@
-"""Bookmark service. All queries filter by user_id to enforce authorization."""
+"""Bookmark CRUD/check service.
+
+Note operations live in ``bookmark_note_service`` and are re-exported here
+temporarily for backward compatibility with existing callers.
+"""
+
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from gim_database.models.persistence import BookmarkedIssue, PersonalNote
@@ -10,19 +15,20 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from gim_backend.core.errors import BookmarkAlreadyExistsError
+from gim_backend.services.bookmark_note_service import (
+    NoteSchema,
+    create_note,
+    delete_note,
+    get_notes_count_for_bookmark,
+    list_notes,
+    update_note,
+)
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_PAGE_SIZE: int = 20
 MAX_PAGE_SIZE: int = 50
-
-
-class NoteSchema(BaseModel):
-    id: UUID
-    bookmark_id: UUID
-    content: str
-    updated_at: datetime
 
 
 class BookmarkSchema(BaseModel):
@@ -36,12 +42,10 @@ class BookmarkSchema(BaseModel):
     notes_count: int = 0
 
 
-
 async def create_bookmark(
     db: AsyncSession,
     user_id: UUID,
     issue_node_id: str,
-
     github_url: str,
     title_snapshot: str,
     body_snapshot: str,
@@ -68,7 +72,6 @@ async def create_bookmark(
     await db.refresh(bookmark)
 
     logger.info(f"Created bookmark {bookmark.id} for user {user_id}")
-    logger.info(f"Created bookmark {bookmark.id} for user {user_id}")
     return BookmarkSchema(
         id=bookmark.id,
         issue_node_id=bookmark.issue_node_id,
@@ -86,7 +89,6 @@ async def list_bookmarks(
     user_id: UUID,
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
-
 ) -> tuple[list[BookmarkSchema], int, bool]:
     if page < 1:
         page = 1
@@ -97,9 +99,7 @@ async def list_bookmarks(
 
     offset = (page - 1) * page_size
 
-    count_stmt = select(func.count()).select_from(BookmarkedIssue).where(
-        BookmarkedIssue.user_id == user_id
-    )
+    count_stmt = select(func.count()).select_from(BookmarkedIssue).where(BookmarkedIssue.user_id == user_id)
     count_result = await db.exec(count_stmt)
     total = count_result.one()
 
@@ -138,7 +138,6 @@ async def get_bookmark(
     db: AsyncSession,
     user_id: UUID,
     bookmark_id: UUID,
-
 ) -> BookmarkSchema | None:
     stmt = (
         select(BookmarkedIssue, func.count(PersonalNote.id))
@@ -168,33 +167,12 @@ async def get_bookmark(
     )
 
 
-
-async def get_bookmark_with_notes_count(
-    db: AsyncSession,
-    user_id: UUID,
-    bookmark_id: UUID,
-) -> tuple[BookmarkedIssue | None, int]:
-    # Deprecated: usage should be replaced by get_bookmark which now includes count
-    schema = await get_bookmark(db, user_id, bookmark_id)
-    if schema is None:
-        return None, 0
-    # Temporary compatibility return
-    # We construct a fake ORM object if really needed, but better to update callers?
-    # Actually, let's update this to return the Schema directly or just remove it if callers are updated.
-    # The integration plan says update 'bookmarks.py' to use shared models.
-    # So we can remove this function if we update the route to use get_bookmark.
-    # For now, let's make it return Schema since we're refactoring.
-    return schema, schema.notes_count
-
-
 async def update_bookmark(
     db: AsyncSession,
     user_id: UUID,
     bookmark_id: UUID,
     is_resolved: bool,
-
 ) -> BookmarkSchema | None:
-    # We need the ORM object to update
     stmt = select(BookmarkedIssue).where(
         BookmarkedIssue.id == bookmark_id,
         BookmarkedIssue.user_id == user_id,
@@ -210,7 +188,6 @@ async def update_bookmark(
     await db.commit()
     await db.refresh(bookmark)
 
-    # Return schema
     return await get_bookmark(db, user_id, bookmark_id)
 
 
@@ -220,7 +197,6 @@ async def delete_bookmark(
     bookmark_id: UUID,
 ) -> bool:
     """Cascade deletes associated notes before removing bookmark."""
-    # We need to find it first. get_bookmark returns schema now, so we need a separate check or custom query.
     stmt = select(BookmarkedIssue).where(
         BookmarkedIssue.id == bookmark_id,
         BookmarkedIssue.user_id == user_id,
@@ -231,9 +207,7 @@ async def delete_bookmark(
     if bookmark is None:
         return False
 
-    delete_notes_stmt = delete(PersonalNote).where(
-        PersonalNote.bookmark_id == bookmark_id
-    )
+    delete_notes_stmt = delete(PersonalNote).where(PersonalNote.bookmark_id == bookmark_id)
     await db.exec(delete_notes_stmt)
 
     db.delete(bookmark)
@@ -241,143 +215,6 @@ async def delete_bookmark(
 
     logger.info(f"Deleted bookmark {bookmark_id} and associated notes for user {user_id}")
     return True
-
-
-async def create_note(
-    db: AsyncSession,
-    user_id: UUID,
-    bookmark_id: UUID,
-    content: str,
-
-) -> NoteSchema | None:
-    # ownership check
-    bm_stmt = select(BookmarkedIssue).where(
-        BookmarkedIssue.id == bookmark_id,
-        BookmarkedIssue.user_id == user_id,
-    )
-    if (await db.exec(bm_stmt)).first() is None:
-        return None
-
-    note = PersonalNote(
-        bookmark_id=bookmark_id,
-        content=content,
-    )
-
-    db.add(note)
-    await db.commit()
-    await db.refresh(note)
-
-    logger.info(f"Created note {note.id} on bookmark {bookmark_id}")
-    return NoteSchema(
-        id=note.id,
-        bookmark_id=note.bookmark_id,
-        content=note.content,
-        updated_at=note.updated_at,
-    )
-
-
-async def list_notes(
-    db: AsyncSession,
-    user_id: UUID,
-    bookmark_id: UUID,
-
-) -> list[NoteSchema] | None:
-    # ownership check
-    bm_stmt = select(BookmarkedIssue).where(
-        BookmarkedIssue.id == bookmark_id,
-        BookmarkedIssue.user_id == user_id,
-    )
-    if (await db.exec(bm_stmt)).first() is None:
-        return None
-
-    stmt = (
-        select(PersonalNote)
-        .where(PersonalNote.bookmark_id == bookmark_id)
-        .order_by(PersonalNote.updated_at.desc())
-    )
-    result = await db.exec(stmt)
-    rows = result.all()
-
-    return [
-        NoteSchema(
-            id=n.id,
-            bookmark_id=n.bookmark_id,
-            content=n.content,
-            updated_at=n.updated_at,
-        )
-        for n in rows
-    ]
-
-
-async def get_note_with_ownership_check(
-    db: AsyncSession,
-    user_id: UUID,
-    note_id: UUID,
-) -> PersonalNote | None:
-    """Verifies ownership via join to parent bookmark."""
-    stmt = (
-        select(PersonalNote)
-        .join(BookmarkedIssue, PersonalNote.bookmark_id == BookmarkedIssue.id)
-        .where(
-            PersonalNote.id == note_id,
-            BookmarkedIssue.user_id == user_id,
-        )
-    )
-    result = await db.exec(stmt)
-    return result.first()
-
-
-async def update_note(
-    db: AsyncSession,
-    user_id: UUID,
-    note_id: UUID,
-    content: str,
-) -> NoteSchema | None:
-    # Need ORM object
-    note = await get_note_with_ownership_check(db, user_id, note_id)
-    if note is None:
-        return None
-
-    note.content = content
-    note.updated_at = datetime.now(UTC)
-
-    await db.commit()
-    await db.refresh(note)
-
-    logger.info(f"Updated note {note_id}")
-    return NoteSchema(
-        id=note.id,
-        bookmark_id=note.bookmark_id,
-        content=note.content,
-        updated_at=note.updated_at,
-    )
-
-
-async def delete_note(
-    db: AsyncSession,
-    user_id: UUID,
-    note_id: UUID,
-) -> bool:
-    note = await get_note_with_ownership_check(db, user_id, note_id)
-    if note is None:
-        return False
-
-    db.delete(note)
-    await db.commit()
-
-    logger.info(f"Deleted note {note_id}")
-    return True
-
-
-async def get_notes_count_for_bookmark(
-    db: AsyncSession,
-    bookmark_id: UUID,
-) -> int:
-    stmt = select(func.count()).select_from(PersonalNote).where(
-        PersonalNote.bookmark_id == bookmark_id
-    )
-    result = await db.exec(stmt)
-    return result.one()
 
 
 async def check_bookmark(
@@ -421,13 +258,10 @@ async def check_bookmarks_batch(
     if not issue_node_ids:
         return {}
 
-    # Dedupe input
     unique_ids = list(set(issue_node_ids))
 
-    # Initialize result with None for all requested IDs
     result_map: dict[str, UUID | None] = {node_id: None for node_id in unique_ids}
 
-    # Fetch all matching bookmarks in single query
     stmt = select(BookmarkedIssue.issue_node_id, BookmarkedIssue.id).where(
         BookmarkedIssue.user_id == user_id,
         BookmarkedIssue.issue_node_id.in_(unique_ids),
@@ -435,7 +269,6 @@ async def check_bookmarks_batch(
     result = await db.exec(stmt)
     rows = result.all()
 
-    # Update result map with found bookmarks
     for row in rows:
         result_map[row.issue_node_id] = row.id
 
@@ -443,12 +276,13 @@ async def check_bookmarks_batch(
 
 
 __all__ = [
+    # Bookmark aggregate API
     "create_bookmark",
     "list_bookmarks",
     "get_bookmark",
-    "get_bookmark_with_notes_count",
     "update_bookmark",
     "delete_bookmark",
+    # Compatibility re-exports from bookmark_note_service (TKT-V019)
     "create_note",
     "list_notes",
     "update_note",
@@ -459,4 +293,3 @@ __all__ = [
     "DEFAULT_PAGE_SIZE",
     "MAX_PAGE_SIZE",
 ]
-

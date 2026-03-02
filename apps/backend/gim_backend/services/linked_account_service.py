@@ -4,6 +4,7 @@ Handles token storage (with encryption), retrieval, refresh, and revocation.
 Used by the profile connect flow to store GitHub OAuth tokens for background
 fetching of user activity data.
 """
+
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -17,16 +18,19 @@ from gim_backend.core.config import get_settings
 
 class TokenEncryptionError(Exception):
     """Raised when token encryption or decryption fails"""
+
     pass
 
 
 class LinkedAccountNotFoundError(Exception):
     """Raised when a linked account does not exist for the given user and provider"""
+
     pass
 
 
 class LinkedAccountRevokedError(Exception):
     """Raised when attempting to use a revoked linked account"""
+
     pass
 
 
@@ -161,14 +165,10 @@ async def get_valid_access_token(
     account = await get_linked_account(db, user_id, provider)
 
     if account is None:
-        raise LinkedAccountNotFoundError(
-            f"No linked {provider} account for user {user_id}"
-        )
+        raise LinkedAccountNotFoundError(f"No linked {provider} account for user {user_id}")
 
     if account.revoked_at is not None:
-        raise LinkedAccountRevokedError(
-            f"{provider} account was disconnected at {account.revoked_at}"
-        )
+        raise LinkedAccountRevokedError(f"{provider} account was disconnected at {account.revoked_at}")
 
     return decrypt_token(account.access_token)
 
@@ -208,31 +208,3 @@ async def list_linked_accounts(
 
     result = await db.exec(statement)
     return list(result.all())
-
-
-async def update_tokens(
-    db: AsyncSession,
-    user_id: UUID,
-    provider: str,
-    access_token: str,
-    refresh_token: str | None = None,
-    expires_at: datetime | None = None,
-) -> LinkedAccount:
-    """Updates tokens for an existing linked account."""
-    account = await get_linked_account(db, user_id, provider)
-
-    if account is None:
-        raise LinkedAccountNotFoundError(
-            f"No linked {provider} account for user {user_id}"
-        )
-
-    account.access_token = encrypt_token(access_token)
-    if refresh_token is not None:
-        account.refresh_token = encrypt_token(refresh_token)
-    if expires_at is not None:
-        account.expires_at = expires_at
-
-    await db.commit()
-    await db.refresh(account)
-    return account
-

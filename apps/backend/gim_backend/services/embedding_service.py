@@ -1,85 +1,128 @@
 """
 Application-scoped embedding service for query vectorization.
-Wraps NomicEmbedder as a singleton to avoid reloading the model per request.
+Wraps NomicMoEEmbedder as a singleton to avoid reloading the model per request.
 Uses asyncio.Lock with double-check pattern for thread safety in multi-worker environments.
 """
 
 import asyncio
 import logging
+from typing import Literal
 
-from gim_backend.ingestion.embeddings import EMBEDDING_DIM, NomicEmbedder
+from gim_backend.ingestion.nomic_moe_embedder import EMBEDDING_DIM, NomicMoEEmbedder
 
 logger = logging.getLogger(__name__)
 
-# Module-level singleton with lock for thread-safe initialization
-_embedder: NomicEmbedder | None = None
+_embedder: NomicMoEEmbedder | None = None
 _embedder_lock: asyncio.Lock = asyncio.Lock()
 
 
-async def get_embedder() -> NomicEmbedder:
+def _is_valid_embedding(vector: list[float] | None) -> bool:
+    return vector is not None and len(vector) == EMBEDDING_DIM
+
+
+async def _embed_texts(
+    texts: list[str],
+    *,
+    embed_kind: Literal["query", "document"],
+    single: bool,
+) -> list[list[float] | None]:
+    if not texts:
+        return []
+
+    try:
+        embedder = await get_embedder()
+        if embed_kind == "query":
+            embeddings = await embedder.embed_queries(texts)
+        else:
+            embeddings = await embedder.embed_documents(texts)
+
+        if single:
+            if embeddings and len(embeddings) > 0:
+                vector = embeddings[0]
+                if not _is_valid_embedding(vector):
+                    logger.warning(
+                        "Embedding %s returned invalid dimension: expected %s, got %s",
+                        embed_kind,
+                        EMBEDDING_DIM,
+                        len(vector) if vector is not None else None,
+                    )
+                    return [None]
+                return [vector]
+            return []
+
+        return [vector if _is_valid_embedding(vector) else None for vector in embeddings]
+    except Exception as e:
+        if single:
+            logger.warning(f"Embedding {embed_kind} failed: {e}")
+        else:
+            logger.warning(f"Batch {embed_kind} embedding failed: {e}")
+        return [None] * len(texts)
+
+
+def assert_vector_dim(vector: list[float] | None, *, context: str) -> None:
+    if vector is None:
+        return
+    if len(vector) != EMBEDDING_DIM:
+        raise ValueError(f"{context} embedding dimension mismatch: expected {EMBEDDING_DIM}, got {len(vector)}")
+
+
+async def get_embedder() -> NomicMoEEmbedder:
     """
-    Returns the singleton NomicEmbedder instance.
+    Returns the singleton NomicMoEEmbedder instance.
     Uses double-check locking to prevent race conditions in multi-worker environments.
     Model loads lazily on first embed call.
     """
     global _embedder
 
-    # Fast path: already initialized
     if _embedder is not None:
         return _embedder
 
-    # Slow path: acquire lock and double-check
     async with _embedder_lock:
-        # Another worker may have initialized while waiting
         if _embedder is None:
             logger.info("Initializing embedding service singleton")
-            _embedder = NomicEmbedder()
+            _embedder = NomicMoEEmbedder()
 
     return _embedder
 
 
 async def embed_query(text: str) -> list[float] | None:
     """
-    Embeds a single search query text into a 768-dim vector.
+    Embeds a single query-like text into a 256-dim vector.
     Uses the singleton embedder to avoid model reload overhead.
 
     Args:
         text: The search query to embed
 
     Returns:
-        768-dimensional normalized embedding vector, or None if embedding fails
+        256-dimensional normalized embedding vector, or None if embedding fails
     """
-    try:
-        embedder = await get_embedder()
-        embeddings = await embedder.embed_batch([text])
-        if embeddings and len(embeddings) > 0:
-            return embeddings[0]
-        return None
-    except Exception as e:
-        logger.warning(f"Embedding query failed: {e}")
-        return None
+    vectors = await _embed_texts([text], embed_kind="query", single=True)
+    return vectors[0] if vectors else None
+
+
+async def embed_document(text: str) -> list[float] | None:
+    """Embeds a single document/content text into a 256-dim vector."""
+    vectors = await _embed_texts([text], embed_kind="document", single=True)
+    return vectors[0] if vectors else None
 
 
 async def embed_queries(texts: list[str]) -> list[list[float] | None]:
     """
-    Embeds multiple search queries in a single batch.
+    Embeds multiple query-like texts in a single batch.
     More efficient than calling embed_query repeatedly.
 
     Args:
         texts: List of search queries to embed
 
     Returns:
-        List of 768-dimensional normalized embedding vectors (None for failed embeddings)
+        List of 256-dimensional normalized embedding vectors (None for failed embeddings)
     """
-    if not texts:
-        return []
+    return await _embed_texts(texts, embed_kind="query", single=False)
 
-    try:
-        embedder = await get_embedder()
-        return await embedder.embed_batch(texts)
-    except Exception as e:
-        logger.warning(f"Batch embedding failed: {e}")
-        return [None] * len(texts)
+
+async def embed_documents(texts: list[str]) -> list[list[float] | None]:
+    """Embeds multiple document/content texts in a single batch."""
+    return await _embed_texts(texts, embed_kind="document", single=False)
 
 
 async def close_embedder() -> None:
@@ -104,10 +147,12 @@ def reset_embedder_for_testing() -> None:
 
 __all__ = [
     "EMBEDDING_DIM",
+    "assert_vector_dim",
     "get_embedder",
     "embed_query",
+    "embed_document",
     "embed_queries",
+    "embed_documents",
     "close_embedder",
     "reset_embedder_for_testing",
 ]
-

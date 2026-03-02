@@ -1,4 +1,5 @@
 """Unit tests for resume parsing service."""
+
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -74,13 +75,17 @@ class TestParseResumeToMarkdown:
         mock_docling.document_converter.DocumentConverter.return_value.convert.return_value = mock_result
         mock_docling.datamodel.base_models.DocumentStream = MagicMock()
 
-        with patch.dict(sys.modules, {
-            "docling": mock_docling,
-            "docling.document_converter": mock_docling.document_converter,
-            "docling.datamodel": mock_docling.datamodel,
-            "docling.datamodel.base_models": mock_docling.datamodel.base_models,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "docling": mock_docling,
+                "docling.document_converter": mock_docling.document_converter,
+                "docling.datamodel": mock_docling.datamodel,
+                "docling.datamodel.base_models": mock_docling.datamodel.base_models,
+            },
+        ):
             from gim_backend.services.resume_parsing_service import parse_resume_to_markdown
+
             result = parse_resume_to_markdown(b"fake pdf bytes", "resume.pdf")
 
         assert "John Doe" in result
@@ -97,13 +102,17 @@ class TestParseResumeToMarkdown:
         mock_docling.document_converter.DocumentConverter.return_value.convert.return_value = mock_result
         mock_docling.datamodel.base_models.DocumentStream = MagicMock()
 
-        with patch.dict(sys.modules, {
-            "docling": mock_docling,
-            "docling.document_converter": mock_docling.document_converter,
-            "docling.datamodel": mock_docling.datamodel,
-            "docling.datamodel.base_models": mock_docling.datamodel.base_models,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "docling": mock_docling,
+                "docling.document_converter": mock_docling.document_converter,
+                "docling.datamodel": mock_docling.datamodel,
+                "docling.datamodel.base_models": mock_docling.datamodel.base_models,
+            },
+        ):
             from gim_backend.services.resume_parsing_service import parse_resume_to_markdown
+
             with pytest.raises(ResumeParseError) as exc_info:
                 parse_resume_to_markdown(b"fake pdf bytes", "resume.pdf")
 
@@ -120,13 +129,17 @@ class TestParseResumeToMarkdown:
         mock_docling.document_converter.DocumentConverter.return_value.convert.return_value = mock_result
         mock_docling.datamodel.base_models.DocumentStream = MagicMock()
 
-        with patch.dict(sys.modules, {
-            "docling": mock_docling,
-            "docling.document_converter": mock_docling.document_converter,
-            "docling.datamodel": mock_docling.datamodel,
-            "docling.datamodel.base_models": mock_docling.datamodel.base_models,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "docling": mock_docling,
+                "docling.document_converter": mock_docling.document_converter,
+                "docling.datamodel": mock_docling.datamodel,
+                "docling.datamodel.base_models": mock_docling.datamodel.base_models,
+            },
+        ):
             from gim_backend.services.resume_parsing_service import parse_resume_to_markdown
+
             with pytest.raises(ResumeParseError):
                 parse_resume_to_markdown(b"fake pdf bytes", "resume.pdf")
 
@@ -139,13 +152,17 @@ class TestParseResumeToMarkdown:
         mock_docling.document_converter.DocumentConverter.return_value.convert.side_effect = Exception("Corrupt PDF")
         mock_docling.datamodel.base_models.DocumentStream = MagicMock()
 
-        with patch.dict(sys.modules, {
-            "docling": mock_docling,
-            "docling.document_converter": mock_docling.document_converter,
-            "docling.datamodel": mock_docling.datamodel,
-            "docling.datamodel.base_models": mock_docling.datamodel.base_models,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "docling": mock_docling,
+                "docling.document_converter": mock_docling.document_converter,
+                "docling.datamodel": mock_docling.datamodel,
+                "docling.datamodel.base_models": mock_docling.datamodel.base_models,
+            },
+        ):
             from gim_backend.services.resume_parsing_service import parse_resume_to_markdown
+
             with pytest.raises(ResumeParseError) as exc_info:
                 parse_resume_to_markdown(b"corrupt bytes", "bad.pdf")
 
@@ -269,7 +286,6 @@ class TestNormalizeEntities:
 
         skills, job_titles, raw_data = normalize_entities(raw)
 
-        # All should normalize to "Python"; only one should appear
         assert skills.count("Python") == 1
 
     def test_handles_empty_input(self):
@@ -420,6 +436,47 @@ class TestProcessResume:
         with pytest.raises(FileTooLargeError):
             await process_resume(mock_db, uuid4(), large_content, "resume.pdf", "application/pdf")
 
+
+class TestInitiateResumeProcessing:
+    @pytest.mark.asyncio
+    async def test_resets_is_calculating_when_enqueue_fails(self):
+        from gim_backend.services.resume_parsing_service import initiate_resume_processing
+
+        user_id = uuid4()
+        profile = MagicMock()
+        profile.is_calculating = False
+
+        mock_db = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        with (
+            patch(
+                "gim_backend.services.resume_parsing_service._get_or_create_profile",
+                new_callable=AsyncMock,
+                return_value=profile,
+            ),
+            patch(
+                "gim_backend.services.resume_parsing_service.mark_onboarding_in_progress",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "gim_backend.services.resume_parsing_service.enqueue_resume_task",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("queue down"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="queue down"):
+                await initiate_resume_processing(
+                    db=mock_db,
+                    user_id=user_id,
+                    file_bytes=b"pdf-bytes",
+                    filename="resume.pdf",
+                    content_type="application/pdf",
+                )
+
+        assert profile.is_calculating is False
+        assert mock_db.commit.await_count == 2
+
     @pytest.mark.asyncio
     async def test_full_pipeline_success(self):
         from gim_backend.services.resume_parsing_service import process_resume
@@ -515,7 +572,6 @@ class TestProcessResume:
                     with patch(
                         "gim_backend.services.resume_parsing_service.extract_entities",
                     ) as mock_extract:
-                        # Only 1 skill; below threshold of 3
                         mock_extract.return_value = [
                             {"text": "Python", "label": "Programming Language", "score": 0.9},
                         ]
@@ -865,7 +921,6 @@ class TestTaxonomyNormalization:
 
         skills, _, _ = normalize_entities(raw)
 
-        # Both should normalize to "React"
         assert "React" in skills
         assert skills.count("React") == 1
 
@@ -895,4 +950,3 @@ class TestTaxonomyNormalization:
         skills, _, _ = normalize_entities(raw)
 
         assert "AWS" in skills
-

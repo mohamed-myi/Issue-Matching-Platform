@@ -1,4 +1,5 @@
 """Unit tests for GitHub profile service."""
+
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -27,10 +28,7 @@ class TestExtractLanguages:
         from gim_backend.services.github_profile_service import extract_languages
 
         starred = [
-            {
-                "primaryLanguage": {"name": "Python"},
-                "languages": {"nodes": [{"name": "Python"}, {"name": "C++"}]}
-            },
+            {"primaryLanguage": {"name": "Python"}, "languages": {"nodes": [{"name": "Python"}, {"name": "C++"}]}},
         ]
         contributed = []
 
@@ -242,7 +240,6 @@ class TestFormatGitHubText:
             descriptions=[],
         )
 
-        # Should only include first 10
         assert "Lang0" in result
         assert "Lang9" in result
         assert "Lang10" not in result
@@ -258,7 +255,6 @@ class TestFormatGitHubText:
             descriptions=[],
         )
 
-        # Should only include first 15
         assert "topic0" in result
         assert "topic14" in result
         assert "topic15" not in result
@@ -292,7 +288,6 @@ class TestCheckMinimalData:
     def test_returns_none_at_exact_threshold(self):
         from gim_backend.services.github_profile_service import check_minimal_data
 
-        # Either threshold met should pass
         result1 = check_minimal_data(starred_count=5, contributed_count=2)
         result2 = check_minimal_data(starred_count=4, contributed_count=3)
 
@@ -302,7 +297,6 @@ class TestCheckMinimalData:
     def test_boundary_condition_just_below(self):
         from gim_backend.services.github_profile_service import check_minimal_data
 
-        # Both below threshold
         result = check_minimal_data(starred_count=4, contributed_count=2)
 
         assert result is not None
@@ -336,30 +330,26 @@ class TestCheckRefreshAllowed:
 
         assert result is not None
         assert result > 0
-        assert result <= 1800  # At most 30 minutes remaining
+        assert result <= 1800
 
     def test_returns_correct_seconds_remaining(self):
         from gim_backend.services.github_profile_service import check_refresh_allowed
 
-        # 50 minutes ago; 10 minutes remaining
         recent_time = datetime.now(UTC) - timedelta(minutes=50)
 
         result = check_refresh_allowed(recent_time)
 
         assert result is not None
-        # Allow some tolerance for test execution time
         assert 500 <= result <= 700
 
     def test_handles_naive_datetime(self):
         from gim_backend.services.github_profile_service import check_refresh_allowed
 
-        # Test with naive datetime (no timezone info)
         naive_time = datetime.now() - timedelta(minutes=30)
 
         result = check_refresh_allowed(naive_time)
 
-        # Should still work and return seconds remaining
-        assert result is not None or result is None  # Just verify no exception
+        assert result is not None or result is None
 
 
 class TestGenerateGitHubVector:
@@ -455,6 +445,7 @@ class TestFetchGitHubProfile:
                 new_callable=AsyncMock,
             ) as mock_token:
                 from gim_backend.services.linked_account_service import LinkedAccountNotFoundError
+
                 mock_token.side_effect = LinkedAccountNotFoundError("No account")
 
                 with pytest.raises(GitHubNotConnectedError) as exc_info:
@@ -488,6 +479,7 @@ class TestFetchGitHubProfile:
                 new_callable=AsyncMock,
             ) as mock_token:
                 from gim_backend.services.linked_account_service import LinkedAccountRevokedError
+
                 mock_token.side_effect = LinkedAccountRevokedError("Revoked")
 
                 with pytest.raises(GitHubNotConnectedError) as exc_info:
@@ -645,3 +637,43 @@ class TestGetGitHubData:
         assert result["vector_status"] == "ready"
         assert "2026-01-04" in result["fetched_at"]
 
+
+class TestInitiateGitHubFetch:
+    @pytest.mark.asyncio
+    async def test_resets_is_calculating_when_enqueue_fails(self):
+        from gim_backend.services.github_profile_service import initiate_github_fetch
+
+        user_id = uuid4()
+        profile = MagicMock()
+        profile.github_fetched_at = None
+        profile.is_calculating = False
+
+        mock_db = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        with (
+            patch(
+                "gim_backend.services.github_profile_service._get_or_create_profile",
+                new_callable=AsyncMock,
+                return_value=profile,
+            ),
+            patch(
+                "gim_backend.services.github_profile_service.get_valid_access_token",
+                new_callable=AsyncMock,
+                return_value="gho_test",
+            ),
+            patch(
+                "gim_backend.services.github_profile_service.mark_onboarding_in_progress",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "gim_backend.services.github_profile_service.enqueue_github_task",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("queue down"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="queue down"):
+                await initiate_github_fetch(mock_db, user_id, is_refresh=False)
+
+        assert profile.is_calculating is False
+        assert mock_db.commit.await_count == 2

@@ -1,6 +1,5 @@
-import os
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -8,19 +7,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 @pytest.fixture(autouse=True)
-def mock_settings():
-    with patch.dict(os.environ, {
-        "FINGERPRINT_SECRET": "test-fingerprint-secret-key-for-testing",
-        "JWT_SECRET_KEY": "test-jwt-secret-key",
-        "SESSION_REMEMBER_ME_DAYS": "7",
-        "SESSION_DEFAULT_HOURS": "24",
-    }):
-        from gim_backend.core.config import get_settings
-        get_settings.cache_clear()
+def mock_settings(settings_env_override):
+    with settings_env_override(
+        {
+            "FINGERPRINT_SECRET": "test-fingerprint-secret-key-for-testing",
+            "JWT_SECRET_KEY": "test-jwt-secret-key",
+            "SESSION_REMEMBER_ME_DAYS": "7",
+            "SESSION_DEFAULT_HOURS": "24",
+        },
+    ):
         yield
-        get_settings.cache_clear()
-
-
 
 
 @pytest.fixture
@@ -95,10 +91,13 @@ class TestListSessionsLogic:
         assert len(other_results) == 1
         assert current_results[0].id == str(current_id)
 
-    @pytest.mark.parametrize("fingerprint,expected", [
-        (None, ""),           # None fingerprint
-        ("abc", "abc"),       # Short fingerprint (< 8 chars)
-    ])
+    @pytest.mark.parametrize(
+        "fingerprint,expected",
+        [
+            (None, ""),  # None fingerprint
+            ("abc", "abc"),  # Short fingerprint (< 8 chars)
+        ],
+    )
     async def test_handles_edge_case_fingerprints(self, mock_db, fingerprint, expected):
         """Edge case fingerprints (None or short) should not crash."""
         from gim_backend.services.session_service import list_sessions
@@ -134,9 +133,8 @@ class TestCountSessionsLogic:
         assert result == 5
         assert isinstance(result, int)
 
-    # NOTE: Zero count test removed - if integer type test passes, zero is just another integer
 
-# NOTE: Refresh session boundary conditions tested in test_session_service.py::TestRefreshSessionLogic
+
 
 class TestSessionInvalidationEdgeCases:
     """Edge cases for session invalidation"""

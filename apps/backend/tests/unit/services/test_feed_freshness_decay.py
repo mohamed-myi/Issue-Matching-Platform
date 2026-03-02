@@ -19,5 +19,3 @@ def test_freshness_decay_half_life_behavior():
     assert v0 == 1.0
     assert abs(v7 - 0.5) < 1e-6
     assert abs(v14 - 0.25) < 1e-6
-
-

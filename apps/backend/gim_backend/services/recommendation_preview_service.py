@@ -1,12 +1,14 @@
 """
 Recommendation preview service for onboarding flow.
 """
+
 from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from gim_backend.services.embedding_service import assert_vector_dim
 from gim_backend.services.profile_service import get_or_create_profile
 
 PREVIEW_LIMIT = 3
@@ -15,6 +17,7 @@ VALID_SOURCES = {"intent", "resume", "github"}
 
 class InvalidSourceError(Exception):
     """Raised when an invalid source parameter is provided."""
+
     pass
 
 
@@ -33,9 +36,7 @@ async def get_preview_recommendations(
 ) -> list[PreviewIssue]:
     """Returns up to 3 issues using the specified source vector; falls back to trending if no vector."""
     if source is not None and source not in VALID_SOURCES:
-        raise InvalidSourceError(
-            f"Invalid source: '{source}'. Valid options: {', '.join(sorted(VALID_SOURCES))}"
-        )
+        raise InvalidSourceError(f"Invalid source: '{source}'. Valid options: {', '.join(sorted(VALID_SOURCES))}")
 
     profile = await get_or_create_profile(db, user_id)
 
@@ -57,6 +58,7 @@ async def _query_by_vector_similarity(
     db: AsyncSession,
     source_vector: list[float],
 ) -> list[PreviewIssue]:
+    assert_vector_dim(source_vector, context="preview source_vector")
     sql = """
     SELECT
         i.node_id,
@@ -129,4 +131,3 @@ __all__ = [
     "PREVIEW_LIMIT",
     "VALID_SOURCES",
 ]
-

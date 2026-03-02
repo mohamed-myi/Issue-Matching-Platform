@@ -2,6 +2,7 @@
 Repository service for repository listing and filtering.
 Used for search filter dropdowns and repository discovery.
 """
+
 import logging
 
 from pydantic import BaseModel
@@ -16,6 +17,7 @@ MAX_LIMIT = 100
 
 class RepositoryItem(BaseModel):
     """Repository summary with issue count."""
+
     name: str  # full_name like "facebook/react"
     primary_language: str | None
     issue_count: int

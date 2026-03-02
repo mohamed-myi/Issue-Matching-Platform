@@ -59,5 +59,3 @@ def test_compute_why_this_empty_when_no_profile_entities():
         top_k=3,
     )
     assert why == []
-
-

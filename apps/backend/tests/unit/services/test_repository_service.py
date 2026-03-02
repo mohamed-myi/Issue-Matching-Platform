@@ -1,4 +1,5 @@
 """Unit tests for repository_service."""
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -81,7 +82,6 @@ class TestListRepositories:
 
         await list_repositories(mock_db, language="Python")
 
-        # Verify SQL was called with language parameter (params is 2nd positional arg)
         params = mock_db.execute.call_args[0][1]
         assert "language" in params
         assert params["language"] == "Python"
@@ -97,7 +97,6 @@ class TestListRepositories:
 
         await list_repositories(mock_db, language="typescript")
 
-        # The query uses LOWER() for case-insensitive matching
         call_args = mock_db.execute.call_args
         sql_query = str(call_args[0][0])
         assert "LOWER" in sql_query
@@ -129,7 +128,6 @@ class TestListRepositories:
         await list_repositories(mock_db, search_query="%")
 
         params = mock_db.execute.call_args[0][1]
-        # The % should be escaped
         assert "%\\%%" in params["search_pattern"]
 
     @pytest.mark.asyncio

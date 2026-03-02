@@ -2,6 +2,7 @@
 Taxonomy service for reference data APIs.
 Thin wrapper around constants for API consistency.
 """
+
 from dataclasses import dataclass
 
 from gim_shared.constants import PROFILE_LANGUAGES, STACK_AREAS
@@ -10,6 +11,7 @@ from gim_shared.constants import PROFILE_LANGUAGES, STACK_AREAS
 @dataclass
 class StackAreaInfo:
     """Stack area with display label and description."""
+
     id: str
     label: str
     description: str

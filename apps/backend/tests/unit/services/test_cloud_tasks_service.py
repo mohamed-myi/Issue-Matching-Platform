@@ -1,4 +1,6 @@
 """Unit tests for Cloud Tasks service."""
+
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 
@@ -7,9 +9,65 @@ class TestCloudTasksClientMockMode:
 
     async def test_enqueue_resume_task_returns_job_id(self):
         from gim_backend.services.cloud_tasks_service import (
+            reset_client_for_testing,
+        )
+
+        reset_client_for_testing()
+
+    async def test_resume_enqueue_uses_shared_builder(self):
+        from gim_backend.services.cloud_tasks_service import (
             get_cloud_tasks_client,
             reset_client_for_testing,
         )
+
+        reset_client_for_testing()
+        client = get_cloud_tasks_client()
+        user_id = uuid4()
+
+        client._enqueue_http_json_task = AsyncMock(return_value="job-123")  # type: ignore[method-assign]
+
+        result = await client.enqueue_resume_task(
+            user_id=user_id,
+            file_bytes=b"test pdf content",
+            filename="resume.pdf",
+            content_type="application/pdf",
+        )
+
+        assert result == "job-123"
+        client._enqueue_http_json_task.assert_awaited_once()
+        _, kwargs = client._enqueue_http_json_task.await_args
+        assert kwargs["user_id"] == user_id
+        assert kwargs["job_type"] == "resume"
+        assert kwargs["endpoint_url"].endswith("/tasks/resume/parse")
+        assert kwargs["log_label"] == "resume parsing"
+        assert kwargs["payload_fields"]["filename"] == "resume.pdf"
+        assert kwargs["payload_fields"]["content_type"] == "application/pdf"
+        assert "file_bytes_b64" in kwargs["payload_fields"]
+
+        reset_client_for_testing()
+
+    async def test_github_enqueue_uses_shared_builder(self):
+        from gim_backend.services.cloud_tasks_service import (
+            get_cloud_tasks_client,
+            reset_client_for_testing,
+        )
+
+        reset_client_for_testing()
+        client = get_cloud_tasks_client()
+        user_id = uuid4()
+
+        client._enqueue_http_json_task = AsyncMock(return_value="job-456")  # type: ignore[method-assign]
+
+        result = await client.enqueue_github_task(user_id=user_id)
+
+        assert result == "job-456"
+        client._enqueue_http_json_task.assert_awaited_once()
+        _, kwargs = client._enqueue_http_json_task.await_args
+        assert kwargs["user_id"] == user_id
+        assert kwargs["job_type"] == "github"
+        assert kwargs["endpoint_url"].endswith("/tasks/github/fetch")
+        assert kwargs["log_label"] == "GitHub fetch"
+        assert kwargs["payload_fields"] == {}
 
         reset_client_for_testing()
         client = get_cloud_tasks_client()
@@ -261,4 +319,3 @@ class TestTaskPayloads:
         assert payload["user_id"] == str(user_id)
 
         reset_client_for_testing()
-

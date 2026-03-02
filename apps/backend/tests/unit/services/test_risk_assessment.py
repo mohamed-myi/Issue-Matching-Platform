@@ -3,6 +3,7 @@ Risk Assessment Service Tests
 
 Tests the risk scoring logic for soft metadata binding.
 """
+
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 

@@ -13,8 +13,6 @@ from pydantic import BaseModel
 _TOKEN_RE = re.compile(r"[a-z0-9\+\#\.]+")
 
 
-
-
 class WhyThisItem(BaseModel):
     entity: str
     score: float
@@ -28,31 +26,31 @@ def _norm(s: str) -> str:
 def _extract_profile_entities(profile: Any) -> set[str]:
     entities: set[str] = set()
 
-    for lang in (getattr(profile, "preferred_languages", None) or []):
+    for lang in getattr(profile, "preferred_languages", None) or []:
         if lang in PROFILE_LANGUAGES:
             entities.add(lang)
-    for lang in (getattr(profile, "github_languages", None) or []):
+    for lang in getattr(profile, "github_languages", None) or []:
         if lang in PROFILE_LANGUAGES:
             entities.add(lang)
 
-    for area in (getattr(profile, "intent_stack_areas", None) or []):
+    for area in getattr(profile, "intent_stack_areas", None) or []:
         if area in STACK_AREAS:
             entities.add(area)
 
-    for raw in (getattr(profile, "preferred_topics", None) or []):
+    for raw in getattr(profile, "preferred_topics", None) or []:
         canon = normalize_skill(raw)
         if canon:
             entities.add(canon)
-    for raw in (getattr(profile, "github_topics", None) or []):
+    for raw in getattr(profile, "github_topics", None) or []:
         canon = normalize_skill(raw)
         if canon:
             entities.add(canon)
 
-    for raw in (getattr(profile, "resume_skills", None) or []):
+    for raw in getattr(profile, "resume_skills", None) or []:
         canon = normalize_skill(raw)
         if canon:
             entities.add(canon)
-    for raw in (getattr(profile, "resume_job_titles", None) or []):
+    for raw in getattr(profile, "resume_job_titles", None) or []:
         canon = normalize_skill(raw)
         if canon:
             entities.add(canon)
@@ -131,5 +129,3 @@ def compute_why_this(
 
 
 __all__ = ["WhyThisItem", "compute_why_this"]
-
-

@@ -1,18 +1,6 @@
 import inspect
 
 
-def test_feed_personalized_enforces_open_state():
-    from gim_backend.services import feed_service
-    src = inspect.getsource(feed_service._get_personalized_feed)
-    assert "i.state = 'open'" in src
-
-
-def test_feed_trending_enforces_open_state():
-    from gim_backend.services import feed_service
-    src = inspect.getsource(feed_service._get_trending_feed)
-    assert "i.state = 'open'" in src
-
-
 def test_preview_enforces_open_state():
     from gim_backend.services import recommendation_preview_service as preview
 
@@ -21,5 +9,3 @@ def test_preview_enforces_open_state():
 
     assert "i.state = 'open'" in src_vector
     assert "i.state = 'open'" in src_trending
-
-

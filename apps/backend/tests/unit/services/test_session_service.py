@@ -1,4 +1,3 @@
-import os
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -8,19 +7,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 
 @pytest.fixture(autouse=True)
-def mock_settings():
-    with patch.dict(os.environ, {
-        "FINGERPRINT_SECRET": "test-fingerprint-secret-key-for-testing",
-        "JWT_SECRET_KEY": "test-jwt-secret-key",
-        "SESSION_REMEMBER_ME_DAYS": "7",
-        "SESSION_DEFAULT_HOURS": "24",
-    }):
-        from gim_backend.core.config import get_settings
-        get_settings.cache_clear()
+def mock_settings(settings_env_override):
+    with settings_env_override(
+        {
+            "FINGERPRINT_SECRET": "test-fingerprint-secret-key-for-testing",
+            "JWT_SECRET_KEY": "test-jwt-secret-key",
+            "SESSION_REMEMBER_ME_DAYS": "7",
+            "SESSION_DEFAULT_HOURS": "24",
+        },
+    ):
         yield
-        get_settings.cache_clear()
-
-
 
 
 @pytest.fixture
@@ -37,6 +33,7 @@ def mock_db():
 @pytest.fixture
 def github_profile():
     from gim_backend.core.oauth import UserProfile
+
     return UserProfile(
         email="test@example.com",
         provider_id="MDQ6VXNlcjEyMzQ1Njc=",
@@ -49,6 +46,7 @@ def github_profile():
 @pytest.fixture
 def google_profile():
     from gim_backend.core.oauth import UserProfile
+
     return UserProfile(
         email="test@example.com",
         provider_id="123456789012345678901",
@@ -151,15 +149,16 @@ class TestIdentityConflicts:
             await link_provider(mock_db, user, github_profile, OAuthProvider.GITHUB)
 
 
-
-
 class TestBulkSessionOperations:
     """Sign out of all other devices feature"""
 
-    @pytest.mark.parametrize("except_id, expected_where_calls", [
-        (uuid4(), 2),
-        (None, 1),
-    ])
+    @pytest.mark.parametrize(
+        "except_id, expected_where_calls",
+        [
+            (uuid4(), 2),
+            (None, 1),
+        ],
+    )
     async def test_invalidate_all_sessions_logic(self, mock_db, except_id, expected_where_calls):
         """
         With except_session_id uses 2 WHERE clauses; without uses 1
@@ -197,9 +196,7 @@ class TestBulkSessionOperations:
             mock_where.where.return_value = MagicMock()
             mock_delete.return_value.where.return_value = mock_where
 
-            count = await invalidate_all_sessions(
-                mock_db, user_id, except_session_id=current_session_id
-            )
+            count = await invalidate_all_sessions(mock_db, user_id, except_session_id=current_session_id)
 
             mock_delete.return_value.where.assert_called_once()
             mock_where.where.assert_called_once()
@@ -231,7 +228,6 @@ class TestDeleteUserCascade:
         mock_user = MagicMock()
         mock_user.id = user_id
 
-        # First call returns user, subsequent calls return delete results
         mock_select_result = MagicMock()
         mock_select_result.first.return_value = mock_user
 
@@ -239,6 +235,7 @@ class TestDeleteUserCascade:
         mock_delete_result.rowcount = 1  # Simulate 1 row deleted per table
 
         call_count = [0]
+
         def exec_side_effect(stmt):
             call_count[0] += 1
             if call_count[0] == 1:
@@ -267,7 +264,6 @@ class TestDeleteUserCascade:
         mock_select_result = MagicMock()
         mock_select_result.first.return_value = mock_user
 
-        # All deletes return 0 except user
         mock_empty_result = MagicMock()
         mock_empty_result.rowcount = 0
 
@@ -275,6 +271,7 @@ class TestDeleteUserCascade:
         mock_user_delete.rowcount = 1
 
         call_count = [0]
+
         def exec_side_effect(stmt):
             call_count[0] += 1
             if call_count[0] == 1:
@@ -288,7 +285,6 @@ class TestDeleteUserCascade:
 
         result = await delete_user_cascade(mock_db, user_id)
 
-        # Should not crash, should only include users in affected tables
         assert "users" in result.tables_affected
         assert result.total_rows >= 1
 
@@ -302,7 +298,6 @@ class TestDeleteUserCascadeIsolation:
 
         user_id = uuid4()
 
-
         mock_user = MagicMock()
         mock_user.id = user_id
 
@@ -313,6 +308,7 @@ class TestDeleteUserCascadeIsolation:
         mock_delete_result.rowcount = 0
 
         call_count = [0]
+
         def exec_side_effect(stmt):
             call_count[0] += 1
             if call_count[0] == 1:
@@ -322,7 +318,6 @@ class TestDeleteUserCascadeIsolation:
         mock_db.exec = AsyncMock(side_effect=exec_side_effect)
         mock_db.begin = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(), __aexit__=AsyncMock()))
 
-        # Execute deletion for user_id
         with patch("gim_backend.services.session_service.delete") as mock_delete:
             mock_chain = MagicMock()
             mock_chain.where.return_value = mock_chain
@@ -331,5 +326,4 @@ class TestDeleteUserCascadeIsolation:
 
             await delete_user_cascade(mock_db, user_id)
 
-            # Verify delete was called (isolation is verified by the WHERE clause)
             assert mock_delete.call_count > 0
