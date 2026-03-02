@@ -1,4 +1,5 @@
 """Tests for fingerprint binding security feature."""
+
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -73,6 +74,7 @@ class TestLogSanitization:
 
     def test_short_query_not_truncated(self):
         """Queries under 20 chars should not be truncated."""
+
         def _redact(q: str, max_len: int = 20) -> str:
             return q if len(q) <= max_len else q[:max_len] + "..."
 
@@ -81,6 +83,7 @@ class TestLogSanitization:
 
     def test_long_query_is_truncated(self):
         """Queries over 20 chars should be truncated with ellipsis."""
+
         def _redact(q: str, max_len: int = 20) -> str:
             return q if len(q) <= max_len else q[:max_len] + "..."
 

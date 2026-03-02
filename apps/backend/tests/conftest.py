@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-# Load .env.local from project root before setting any defaults.
-# This ensures integration tests use the real DATABASE_URL.
+# Load .env files before setting defaults. Tests force safe defaults for
+# sensitive connection settings unless an explicit opt-in is provided.
 project_root = Path(__file__).resolve().parent.parent.parent.parent
 env_local_path = project_root / ".env.local"
 try:
@@ -23,7 +23,14 @@ os.environ.setdefault("GITHUB_CLIENT_SECRET", "test_github_client_secret")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test_google_client_id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test_google_client_secret")
 os.environ.setdefault("ENVIRONMENT", "development")
-os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
+
+# Default test runs must never require or accidentally use a real/prod DB.
+# Opt-in flags are handled by dedicated integration tests only.
+if os.getenv("RUN_REAL_DB_INTEGRATION") != "1" and os.getenv("RUN_PROD_DB_TESTS") != "1":
+    os.environ["DATABASE_URL"] = "postgresql://test:test@localhost:5432/testdb"
+else:
+    os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
+
 os.environ["REDIS_URL"] = ""  # Force in-memory rate limiting for tests
 
 # Order matters: import base models first, then those with relationships.
@@ -53,3 +60,16 @@ async def reset_global_state():
     reset_redis_for_testing()
     reset_rate_limiter()
     reset_rate_limiter_instance()
+
+
+@pytest.fixture
+def sample_q_components():
+    """Shared ingestion test fixture for representative quality gate components."""
+    from gim_backend.ingestion.quality_gate import QScoreComponents
+
+    return QScoreComponents(
+        has_code=True,
+        has_headers=True,
+        tech_weight=0.5,
+        is_junk=False,
+    )
