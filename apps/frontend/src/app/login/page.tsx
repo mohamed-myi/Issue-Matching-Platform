@@ -8,35 +8,8 @@ import { authInit } from "@/lib/api/endpoints";
 import { getApiErrorMessage } from "@/lib/api/client";
 import { getApiBaseUrl } from "@/lib/api/base-url";
 import { useMe } from "@/lib/api/hooks";
+import { getOAuthErrorMessage } from "@/lib/auth/oauth-error-messages";
 import type { OAuthProvider } from "@/lib/api/types";
-
-// Map backend error codes to user-friendly messages.
-function getOAuthErrorMessage(code: string, provider: string | null): string {
-  const providerName = provider
-    ? provider.charAt(0).toUpperCase() + provider.slice(1)
-    : "another provider";
-
-  switch (code) {
-    case "existing_account":
-      return `An account with this email already exists via ${providerName}. Please sign in with ${providerName} instead, or use a different account.`;
-    case "consent_denied":
-      return "Login was cancelled. You can try again whenever you're ready.";
-    case "code_expired":
-      return "The login session expired. Please try again.";
-    case "email_not_verified":
-      return `Your ${providerName} email is not verified. Please verify it and try again.`;
-    case "no_email":
-      return `We couldn't retrieve an email from ${providerName}. Make sure your email is public or try a different provider.`;
-    case "csrf_failed":
-      return "Login could not be verified (security check failed). Please try again.";
-    case "invalid_provider":
-      return "Invalid login provider. Please try again.";
-    case "missing_code":
-      return "Login did not complete. Please try again.";
-    default:
-      return "Something went wrong during login. Please try again.";
-  }
-}
 
 export default function LoginPage() {
   const searchParams = useSearchParams();
@@ -53,18 +26,14 @@ export default function LoginPage() {
     return getOAuthErrorMessage(errorCode, provider);
   }, [searchParams]);
 
-  // Redirect already-authenticated users to dashboard.
-  // Middleware handles the fast path; this is the client-side net.
   useEffect(() => {
     if (meQuery.isSuccess) {
       router.replace("/dashboard");
     }
   }, [meQuery.isSuccess, router]);
 
-  // Handle backend OAuth error redirects.
   useEffect(() => {
     if (oauthError) {
-      // Remove error from URL.
       router.replace("/login");
     }
   }, [oauthError, router]);

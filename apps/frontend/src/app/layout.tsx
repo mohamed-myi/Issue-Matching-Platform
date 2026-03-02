@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import "./globals.css";
 import { Providers } from "./providers";
+import { fetchBootstrapMe } from "@/lib/api/server";
 
 export const metadata: Metadata = {
   title: {
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
     siteName: "IssueIndex",
     images: [
       {
-        url: "/og-image.png", // I don't have this image yet but good practice to link
+        url: "/og-image.png",
         width: 1200,
         height: 630,
         alt: "IssueIndex Platform",
@@ -32,6 +33,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
   const hasSession = cookieStore.has("session_id");
+  const initialAuthMe = hasSession ? await fetchBootstrapMe() : null;
 
   return (
     <html lang="en">
@@ -41,9 +43,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             __html: `window.__HAS_SESSION__=${hasSession}`,
           }}
         />
-        <Providers>{children}</Providers>
+        <Providers initialAuthMe={initialAuthMe}>{children}</Providers>
       </body>
     </html>
   );
 }
-

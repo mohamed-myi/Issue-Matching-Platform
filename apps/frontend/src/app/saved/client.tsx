@@ -14,7 +14,7 @@ import { listBookmarks } from "@/lib/api/endpoints";
 import { useDeleteBookmark, usePatchBookmark } from "@/lib/api/hooks";
 import { getApiErrorMessage } from "@/lib/api/client";
 import { useAuthGuard } from "@/lib/hooks/use-auth-guard";
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 
 type FilterTab = "all" | "unresolved" | "resolved";
 
@@ -114,7 +114,6 @@ export default function SavedClient() {
         </p>
       </div>
 
-      {/* Filter tabs */}
       <div className="mb-6 flex items-center gap-2">
         <FilterTabButton
           active={filterTab === "all"}
@@ -208,13 +207,13 @@ export default function SavedClient() {
             ))}
           </div>
 
-              {hasMore && (
-                <LoadMoreButton
-                  onClick={handleLoadMore}
-                  isLoading={bookmarksQuery.isFetchingNextPage}
-                  remaining={remaining}
-                />
-              )}
+          {hasMore && (
+            <LoadMoreButton
+              onClick={handleLoadMore}
+              isLoading={bookmarksQuery.isFetchingNextPage}
+              remaining={remaining}
+            />
+          )}
         </>
       )}
     </AppShell>
