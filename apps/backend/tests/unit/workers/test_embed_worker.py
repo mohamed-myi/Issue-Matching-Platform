@@ -1,4 +1,5 @@
 """Unit tests for embed worker endpoints."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -32,15 +33,25 @@ class TestCloudTasksVerification:
             result = _verify_cloud_tasks_token(None)
             assert result is True
 
-    def test_accepts_request_with_cloud_tasks_header(self):
-        """Requests with Cloud Tasks header should be accepted."""
+    def test_accepts_request_with_valid_oidc_and_header(self):
+        """Production requires Cloud Tasks header plus valid OIDC bearer."""
         with patch("gim_backend.workers.embed_worker.settings") as mock_settings:
             mock_settings.environment = "production"
+            mock_settings.embed_worker_url = "https://embed.example"
 
-            from gim_backend.workers.embed_worker import _verify_cloud_tasks_token
+            with patch(
+                "gim_backend.workers.embed_worker._verify_oidc_bearer_token",
+                return_value=True,
+            ) as mock_verify:
+                from gim_backend.workers.embed_worker import _verify_cloud_tasks_token
 
-            result = _verify_cloud_tasks_token("task-name-123")
-            assert result is True
+                result = _verify_cloud_tasks_token(
+                    "task-name-123",
+                    "Bearer token",
+                    audience="https://embed.example/tasks/embed/resume",
+                )
+                assert result is True
+                mock_verify.assert_called_once()
 
     def test_rejects_request_without_header_in_production(self):
         """Production requests without header should be rejected."""
@@ -50,6 +61,20 @@ class TestCloudTasksVerification:
             from gim_backend.workers.embed_worker import _verify_cloud_tasks_token
 
             result = _verify_cloud_tasks_token(None)
+            assert result is False
+
+    def test_rejects_spoofed_header_without_bearer_in_production(self):
+        with patch("gim_backend.workers.embed_worker.settings") as mock_settings:
+            mock_settings.environment = "production"
+            mock_settings.embed_worker_url = "https://embed.example"
+
+            from gim_backend.workers.embed_worker import _verify_cloud_tasks_token
+
+            result = _verify_cloud_tasks_token(
+                "task-name-123",
+                None,
+                audience="https://embed.example/tasks/embed/resume",
+            )
             assert result is False
 
 
@@ -76,7 +101,7 @@ class TestResumeEmbedEndpoint:
 
             assert response.status_code == 403
 
-    def test_accepts_request_with_cloud_tasks_header(self):
+    def test_accepts_request_with_valid_cloud_tasks_auth(self):
         from fastapi.testclient import TestClient
 
         from gim_backend.workers.embed_worker import app
@@ -86,16 +111,19 @@ class TestResumeEmbedEndpoint:
         mock_profile.intent_vector = None
         mock_profile.github_vector = None
 
-        with patch("gim_backend.workers.embed_worker.settings") as mock_settings, \
-             patch("gim_backend.workers.embed_worker.embed_query", new_callable=AsyncMock) as mock_embed, \
-             patch("gim_backend.workers.embed_worker.async_session_factory") as mock_session_factory, \
-             patch("gim_backend.workers.embed_worker._get_profile", new_callable=AsyncMock) as mock_get_profile, \
-             patch("gim_backend.workers.embed_worker.calculate_combined_vector", new_callable=AsyncMock) as mock_calc:
-
+        with (
+            patch("gim_backend.workers.embed_worker.settings") as mock_settings,
+            patch("gim_backend.workers.embed_worker.embed_document", new_callable=AsyncMock) as mock_embed,
+            patch("gim_backend.workers.embed_worker.async_session_factory") as mock_session_factory,
+            patch("gim_backend.workers.embed_worker._get_profile", new_callable=AsyncMock) as mock_get_profile,
+            patch("gim_backend.workers.embed_worker.calculate_combined_vector", new_callable=AsyncMock) as mock_calc,
+            patch("gim_backend.workers.embed_worker._verify_oidc_bearer_token", return_value=True),
+        ):
             mock_settings.environment = "production"
-            mock_embed.return_value = [0.1] * 768
+            mock_settings.embed_worker_url = "https://embed.example"
+            mock_embed.return_value = [0.1] * 256
             mock_get_profile.return_value = mock_profile
-            mock_calc.return_value = [0.1] * 768
+            mock_calc.return_value = [0.1] * 256
 
             mock_db = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_db
@@ -108,7 +136,10 @@ class TestResumeEmbedEndpoint:
                     "user_id": str(user_id),
                     "markdown_text": "Test markdown content",
                 },
-                headers={"X-CloudTasks-TaskName": "task-123"},
+                headers={
+                    "X-CloudTasks-TaskName": "task-123",
+                    "Authorization": "Bearer token",
+                },
             )
 
             assert response.status_code == 200
@@ -150,13 +181,14 @@ class TestProfileNotFound:
 
         user_id = uuid4()
 
-        with patch("gim_backend.workers.embed_worker.settings") as mock_settings, \
-             patch("gim_backend.workers.embed_worker.embed_query", new_callable=AsyncMock) as mock_embed, \
-             patch("gim_backend.workers.embed_worker.async_session_factory") as mock_session_factory, \
-             patch("gim_backend.workers.embed_worker._get_profile", new_callable=AsyncMock) as mock_get_profile:
-
+        with (
+            patch("gim_backend.workers.embed_worker.settings") as mock_settings,
+            patch("gim_backend.workers.embed_worker.embed_document", new_callable=AsyncMock) as mock_embed,
+            patch("gim_backend.workers.embed_worker.async_session_factory") as mock_session_factory,
+            patch("gim_backend.workers.embed_worker._get_profile", new_callable=AsyncMock) as mock_get_profile,
+        ):
             mock_settings.environment = "development"
-            mock_embed.return_value = [0.1] * 768
+            mock_embed.return_value = [0.1] * 256
             mock_get_profile.return_value = None
 
             mock_db = AsyncMock()
@@ -176,4 +208,3 @@ class TestProfileNotFound:
             data = response.json()
             assert data["status"] == "abandoned"
             assert data["reason"] == "profile_not_found"
-

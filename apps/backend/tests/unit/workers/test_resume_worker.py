@@ -1,4 +1,5 @@
 """Unit tests for resume worker endpoints."""
+
 import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -33,15 +34,25 @@ class TestCloudTasksVerification:
             result = _verify_cloud_tasks_token(None)
             assert result is True
 
-    def test_accepts_request_with_cloud_tasks_header(self):
-        """Requests with Cloud Tasks header should be accepted."""
+    def test_accepts_request_with_valid_oidc_and_header(self):
+        """Production requires Cloud Tasks header plus valid OIDC bearer."""
         with patch("gim_backend.workers.resume_worker.settings") as mock_settings:
             mock_settings.environment = "production"
+            mock_settings.resume_worker_url = "https://resume.example"
 
-            from gim_backend.workers.resume_worker import _verify_cloud_tasks_token
+            with patch(
+                "gim_backend.workers.resume_worker._verify_oidc_bearer_token",
+                return_value=True,
+            ) as mock_verify:
+                from gim_backend.workers.resume_worker import _verify_cloud_tasks_token
 
-            result = _verify_cloud_tasks_token("task-name-123")
-            assert result is True
+                result = _verify_cloud_tasks_token(
+                    "task-name-123",
+                    "Bearer token",
+                    audience="https://resume.example/tasks/resume/parse",
+                )
+                assert result is True
+                mock_verify.assert_called_once()
 
     def test_rejects_request_without_header_in_production(self):
         """Production requests without header should be rejected."""
@@ -51,6 +62,20 @@ class TestCloudTasksVerification:
             from gim_backend.workers.resume_worker import _verify_cloud_tasks_token
 
             result = _verify_cloud_tasks_token(None)
+            assert result is False
+
+    def test_rejects_spoofed_header_without_bearer_in_production(self):
+        with patch("gim_backend.workers.resume_worker.settings") as mock_settings:
+            mock_settings.environment = "production"
+            mock_settings.resume_worker_url = "https://resume.example"
+
+            from gim_backend.workers.resume_worker import _verify_cloud_tasks_token
+
+            result = _verify_cloud_tasks_token(
+                "task-name-123",
+                None,
+                audience="https://resume.example/tasks/resume/parse",
+            )
             assert result is False
 
 
@@ -104,23 +129,25 @@ class TestResumeParseEndpoint:
             captured_content = file_bytes
             return "# Parsed Markdown\n\nSkills: Python, Docker"
 
-        with patch("gim_backend.workers.resume_worker.settings") as mock_settings, \
-             patch("gim_backend.workers.resume_worker.parse_resume_to_markdown", side_effect=capture_parse), \
-             patch("gim_backend.workers.resume_worker.extract_entities") as mock_extract, \
-             patch("gim_backend.workers.resume_worker.normalize_entities") as mock_normalize, \
-             patch("gim_backend.workers.resume_worker.check_minimal_data") as mock_check, \
-             patch("gim_backend.workers.resume_worker.embed_query", new_callable=AsyncMock) as mock_embed, \
-             patch("gim_backend.workers.resume_worker.async_session_factory") as mock_session_factory, \
-             patch("gim_backend.workers.resume_worker._get_profile", new_callable=AsyncMock) as mock_get_profile, \
-             patch("gim_backend.workers.resume_worker.calculate_combined_vector", new_callable=AsyncMock) as mock_calc:
-
+        with (
+            patch("gim_backend.workers.resume_worker.settings") as mock_settings,
+            patch("gim_backend.workers.resume_worker.parse_resume_to_markdown", side_effect=capture_parse),
+            patch("gim_backend.workers.resume_worker.extract_entities") as mock_extract,
+            patch("gim_backend.workers.resume_worker.normalize_entities") as mock_normalize,
+            patch("gim_backend.workers.resume_worker.check_minimal_data") as mock_check,
+            patch("gim_backend.workers.resume_worker.embed_document", new_callable=AsyncMock) as mock_embed,
+            patch("gim_backend.workers.resume_worker.async_session_factory") as mock_session_factory,
+            patch("gim_backend.workers.resume_worker._get_profile", new_callable=AsyncMock) as mock_get_profile,
+            patch("gim_backend.workers.resume_worker.calculate_combined_vector", new_callable=AsyncMock) as mock_calc,
+            patch("gim_backend.workers.resume_worker._verify_oidc_bearer_token", return_value=True),
+        ):
             mock_settings.environment = "development"
             mock_extract.return_value = []
             mock_normalize.return_value = (["Python"], [], {})
             mock_check.return_value = None
-            mock_embed.return_value = [0.1] * 768
+            mock_embed.return_value = [0.1] * 256
             mock_get_profile.return_value = mock_profile
-            mock_calc.return_value = [0.1] * 768
+            mock_calc.return_value = [0.1] * 256
 
             mock_db = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_db
@@ -154,14 +181,15 @@ class TestProfileNotFound:
         file_b64 = base64.b64encode(file_content).decode("utf-8")
         user_id = uuid4()
 
-        with patch("gim_backend.workers.resume_worker.settings") as mock_settings, \
-             patch("gim_backend.workers.resume_worker.parse_resume_to_markdown") as mock_parse, \
-             patch("gim_backend.workers.resume_worker.extract_entities") as mock_extract, \
-             patch("gim_backend.workers.resume_worker.normalize_entities") as mock_normalize, \
-             patch("gim_backend.workers.resume_worker.check_minimal_data") as mock_check, \
-             patch("gim_backend.workers.resume_worker.async_session_factory") as mock_session_factory, \
-             patch("gim_backend.workers.resume_worker._get_profile", new_callable=AsyncMock) as mock_get_profile:
-
+        with (
+            patch("gim_backend.workers.resume_worker.settings") as mock_settings,
+            patch("gim_backend.workers.resume_worker.parse_resume_to_markdown") as mock_parse,
+            patch("gim_backend.workers.resume_worker.extract_entities") as mock_extract,
+            patch("gim_backend.workers.resume_worker.normalize_entities") as mock_normalize,
+            patch("gim_backend.workers.resume_worker.check_minimal_data") as mock_check,
+            patch("gim_backend.workers.resume_worker.async_session_factory") as mock_session_factory,
+            patch("gim_backend.workers.resume_worker._get_profile", new_callable=AsyncMock) as mock_get_profile,
+        ):
             mock_settings.environment = "development"
             mock_parse.return_value = "# Resume"
             mock_extract.return_value = []
@@ -207,16 +235,18 @@ class TestSuccessfulParsing:
         mock_profile.intent_vector = None
         mock_profile.github_vector = None
 
-        with patch("gim_backend.workers.resume_worker.settings") as mock_settings, \
-             patch("gim_backend.workers.resume_worker.parse_resume_to_markdown") as mock_parse, \
-             patch("gim_backend.workers.resume_worker.extract_entities") as mock_extract, \
-             patch("gim_backend.workers.resume_worker.normalize_entities") as mock_normalize, \
-             patch("gim_backend.workers.resume_worker.check_minimal_data") as mock_check, \
-             patch("gim_backend.workers.resume_worker.embed_query", new_callable=AsyncMock) as mock_embed, \
-             patch("gim_backend.workers.resume_worker.async_session_factory") as mock_session_factory, \
-             patch("gim_backend.workers.resume_worker._get_profile", new_callable=AsyncMock) as mock_get_profile, \
-             patch("gim_backend.workers.resume_worker.calculate_combined_vector", new_callable=AsyncMock) as mock_calc:
-
+        with (
+            patch("gim_backend.workers.resume_worker.settings") as mock_settings,
+            patch("gim_backend.workers.resume_worker.parse_resume_to_markdown") as mock_parse,
+            patch("gim_backend.workers.resume_worker.extract_entities") as mock_extract,
+            patch("gim_backend.workers.resume_worker.normalize_entities") as mock_normalize,
+            patch("gim_backend.workers.resume_worker.check_minimal_data") as mock_check,
+            patch("gim_backend.workers.resume_worker.embed_document", new_callable=AsyncMock) as mock_embed,
+            patch("gim_backend.workers.resume_worker.async_session_factory") as mock_session_factory,
+            patch("gim_backend.workers.resume_worker._get_profile", new_callable=AsyncMock) as mock_get_profile,
+            patch("gim_backend.workers.resume_worker.calculate_combined_vector", new_callable=AsyncMock) as mock_calc,
+            patch("gim_backend.workers.resume_worker._verify_oidc_bearer_token", return_value=True),
+        ):
             mock_settings.environment = "development"
             mock_parse.return_value = "# Resume\n\n## Skills\nPython, Docker, FastAPI"
             mock_extract.return_value = [
@@ -230,9 +260,9 @@ class TestSuccessfulParsing:
                 {"entities": [], "unrecognized": []},
             )
             mock_check.return_value = None
-            mock_embed.return_value = [0.1] * 768
+            mock_embed.return_value = [0.1] * 256
             mock_get_profile.return_value = mock_profile
-            mock_calc.return_value = [0.1] * 768
+            mock_calc.return_value = [0.1] * 256
 
             mock_db = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_db
@@ -257,4 +287,3 @@ class TestSuccessfulParsing:
             assert data["skills_count"] == 2
             assert data["job_titles_count"] == 1
             assert data["vector_generated"] is True
-
