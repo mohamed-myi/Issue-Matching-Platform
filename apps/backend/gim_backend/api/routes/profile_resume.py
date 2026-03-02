@@ -25,6 +25,7 @@ router = APIRouter()
 
 class ResumeUploadAcceptedResponse(BaseModel):
     """Response after initiating async resume processing."""
+
     job_id: str
     status: str
     message: str
@@ -32,6 +33,7 @@ class ResumeUploadAcceptedResponse(BaseModel):
 
 class ResumeDataResponse(BaseModel):
     """Response containing stored resume data."""
+
     status: str
     skills: list[str]
     job_titles: list[str]
@@ -46,10 +48,7 @@ def _handle_resume_error(e: Exception) -> HTTPException:
     if isinstance(e, FileTooLargeError):
         return HTTPException(status_code=413, detail="Resume must be under 5MB")
     if isinstance(e, ResumeParseError):
-        return HTTPException(
-            status_code=422,
-            detail="We couldn't read your resume. Try a different format?"
-        )
+        return HTTPException(status_code=422, detail="We couldn't read your resume. Try a different format?")
 
     return handle_profile_error(e)
 
@@ -126,10 +125,7 @@ async def get_resume(
     data = await get_resume_data(db, user.id)
 
     if data is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No resume data found. Upload a resume first."
-        )
+        raise HTTPException(status_code=404, detail="No resume data found. Upload a resume first.")
 
     return ResumeDataResponse(
         status=data["status"],
@@ -161,9 +157,6 @@ async def delete_resume_data(
     was_deleted = await delete_resume(db, user.id)
 
     if not was_deleted:
-        raise HTTPException(
-            status_code=404,
-            detail="No resume data to delete"
-        )
+        raise HTTPException(status_code=404, detail="No resume data to delete")
 
     return {"deleted": True, "message": "Resume data cleared"}

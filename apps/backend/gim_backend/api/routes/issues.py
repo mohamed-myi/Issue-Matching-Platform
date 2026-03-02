@@ -1,4 +1,5 @@
 """API routes for issue discovery and detail endpoints."""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,10 +21,10 @@ router = APIRouter()
 
 class SimilarIssuesResponse(BaseModel):
     """List of similar issues."""
+
     issues: list[SimilarIssue]
 
 
-# Endpoints
 
 @router.get("/{node_id}", response_model=IssueDetail)
 async def get_issue_detail(
@@ -60,9 +61,6 @@ async def get_similar_issues_endpoint(
     similar = await get_similar_issues(db, node_id, limit=limit)
 
     if similar is None:
-        # Source issue not found
         raise HTTPException(status_code=404, detail="Issue not found")
 
-    return SimilarIssuesResponse(
-        issues=similar
-    )
+    return SimilarIssuesResponse(issues=similar)

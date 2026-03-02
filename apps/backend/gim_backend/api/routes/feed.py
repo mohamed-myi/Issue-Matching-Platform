@@ -2,6 +2,7 @@
 Feed API route for personalized issue recommendations.
 Uses combined_vector for similarity; falls back to trending when no profile.
 """
+
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -25,10 +26,9 @@ from gim_backend.services.recommendation_event_service import (
 router = APIRouter()
 
 
-
-
 class FeedResponse(FeedPage):
     """Paginated feed response with personalization metadata."""
+
     recommendation_batch_id: str = Field(
         description="Server generated identifier for logging impressions and clicks for this response.",
     )
@@ -43,7 +43,9 @@ async def get_feed_route(
         le=MAX_PAGE_SIZE,
         description="Results per page",
     ),
-    languages: list[str] = Query(default=[], description="Filter by programming languages (overrides profile preferences)"),
+    languages: list[str] = Query(
+        default=[], description="Filter by programming languages (overrides profile preferences)"
+    ),
     labels: list[str] = Query(default=[], description="Filter by issue labels"),
     repos: list[str] = Query(default=[], description="Filter by repository full names"),
     auth: tuple[User, Session] = Depends(require_auth),
@@ -98,4 +100,3 @@ async def get_feed_route(
         recommendation_batch_id=str(recommendation_batch_id),
         **feed.model_dump(),
     )
-

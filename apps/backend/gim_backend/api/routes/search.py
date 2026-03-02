@@ -34,14 +34,15 @@ from gim_backend.services.search_service import (
 router = APIRouter()
 
 
-# Rate limit constants
+
 ANON_SEARCH_LIMIT = 10
 AUTH_SEARCH_LIMIT = 60
-RATE_LIMIT_WINDOW = 60 # secs
+RATE_LIMIT_WINDOW = 60  # secs
 
 
 class SearchFiltersInput(BaseModel):
     """API input model for search filters."""
+
     languages: list[str] = Field(default_factory=list, max_length=10)
     labels: list[str] = Field(default_factory=list, max_length=20)
     repos: list[str] = Field(default_factory=list, max_length=10)
@@ -49,13 +50,11 @@ class SearchFiltersInput(BaseModel):
 
 class SearchRequestInput(BaseModel):
     """API input model for search request."""
+
     query: str = Field(..., min_length=1, max_length=500)
     filters: SearchFiltersInput = Field(default_factory=SearchFiltersInput)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)
-
-
-
 
 
 async def _get_optional_user_id(request: Request, db: AsyncSession) -> UUID | None:
@@ -140,7 +139,6 @@ async def search(
     Hybrid search combining vector similarity and BM25 full-text search.
     Results are ranked using Reciprocal Rank Fusion (RRF).
     """
-    # Convert input models to service models
     filters = SearchFilters(
         languages=body.filters.languages,
         labels=body.filters.labels,
@@ -154,19 +152,15 @@ async def search(
         page_size=body.page_size,
     )
 
-    # Check cache first
     cached_response = await get_cached_search(request)
     if cached_response:
         response = cached_response
         cache_hit = True
     else:
-        # Execute hybrid search
         response = await hybrid_search(db, request)
-        # Cache the response
         await cache_search_response(request, response)
         cache_hit = False
 
-    # Log search for analytics (interaction logging is separate)
     log_audit_event(
         AuditEvent.SEARCH,
         user_id=user_id,
@@ -180,10 +174,8 @@ async def search(
         },
     )
 
-    # Convert to output model
-    # Store validated search context for interaction logging.
-    # This enables /search/interact to persist query_text, filters_json, and result_count
-    # without trusting client-provided context fields.
+    # Store validated search context for interaction logging
+    # so /search/interact doesn't need to trust client-provided fields.
     await cache_search_context(
         search_id=response.search_id,
         query_text=body.query,
@@ -191,6 +183,7 @@ async def search(
         result_count=response.total,
         page=body.page,
         page_size=body.page_size,
+        page_node_ids=[result.node_id for result in response.results],
     )
 
     return response
@@ -198,6 +191,7 @@ async def search(
 
 class InteractionInput(BaseModel):
     """API input for logging search result interactions."""
+
     search_id: str = Field(..., description="UUID from search response")
     selected_node_id: str = Field(..., description="Issue node_id that was clicked")
     position: int = Field(..., ge=1, description="1-indexed position in results")
@@ -230,6 +224,7 @@ async def log_interaction(
     result_count = context.get("result_count")
     page = context.get("page")
     page_size = context.get("page_size")
+    page_node_ids = context.get("page_node_ids")
 
     if not isinstance(query_text, str) or not query_text.strip():
         raise HTTPException(status_code=400, detail="Invalid search context query_text")
@@ -241,6 +236,8 @@ async def log_interaction(
         raise HTTPException(status_code=400, detail="Invalid search context page")
     if not isinstance(page_size, int) or page_size < 1:
         raise HTTPException(status_code=400, detail="Invalid search context page_size")
+    if not isinstance(page_node_ids, list) or not all(isinstance(x, str) for x in page_node_ids):
+        raise HTTPException(status_code=400, detail="Invalid search context page_node_ids")
 
     if result_count == 0:
         raise HTTPException(status_code=400, detail="Invalid interaction position for empty result set")
@@ -251,7 +248,12 @@ async def log_interaction(
     if body.position < min_pos or body.position > max_pos:
         raise HTTPException(status_code=400, detail="Invalid interaction position")
 
-    # Insert interaction record into analytics.search_interactions
+    page_index = body.position - min_pos
+    if page_index >= len(page_node_ids):
+        raise HTTPException(status_code=400, detail="Invalid search context page_node_ids")
+    if page_node_ids[page_index] != body.selected_node_id:
+        raise HTTPException(status_code=400, detail="Invalid selected_node_id for position")
+
     sql = text("""
         INSERT INTO analytics.search_interactions
         (search_id, user_id, query_text, filters_json, result_count, selected_node_id, position)
@@ -267,15 +269,18 @@ async def log_interaction(
     """)
 
     try:
-        await db.execute(sql, {
-            "search_id": search_uuid,
-            "user_id": user_id,
-            "query_text": query_text,
-            "filters_json": json.dumps(filters_json),
-            "result_count": result_count,
-            "selected_node_id": body.selected_node_id,
-            "position": body.position,
-        })
+        await db.execute(
+            sql,
+            {
+                "search_id": search_uuid,
+                "user_id": user_id,
+                "query_text": query_text,
+                "filters_json": json.dumps(filters_json),
+                "result_count": result_count,
+                "selected_node_id": body.selected_node_id,
+                "position": body.position,
+            },
+        )
         await db.commit()
     except Exception as e:
         await db.rollback()
@@ -304,4 +309,3 @@ async def log_interaction(
     )
 
     return Response(status_code=204)
-

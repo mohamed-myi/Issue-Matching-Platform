@@ -2,6 +2,7 @@
 Taxonomy API routes for reference data.
 All endpoints are public (no authentication required).
 """
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -15,11 +16,13 @@ router = APIRouter()
 
 class LanguagesResponse(BaseModel):
     """Valid programming languages for profile and filters."""
+
     languages: list[str]
 
 
 class StackAreaOutput(BaseModel):
     """Single stack area with label and description."""
+
     id: str
     label: str
     description: str
@@ -27,6 +30,7 @@ class StackAreaOutput(BaseModel):
 
 class StackAreasResponse(BaseModel):
     """Valid stack areas for intent form."""
+
     stack_areas: list[StackAreaOutput]
 
 
@@ -52,8 +56,5 @@ async def get_stack_areas_route() -> StackAreasResponse:
     """
     areas = get_stack_areas()
     return StackAreasResponse(
-        stack_areas=[
-            StackAreaOutput(id=a.id, label=a.label, description=a.description)
-            for a in areas
-        ]
+        stack_areas=[StackAreaOutput(id=a.id, label=a.label, description=a.description) for a in areas]
     )

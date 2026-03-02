@@ -1,4 +1,5 @@
 """Bookmarks and Notes API routes."""
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -86,17 +87,20 @@ class NoteListOutput(BaseModel):
 
 class BookmarkCheckOutput(BaseModel):
     """Single bookmark check response."""
+
     bookmarked: bool
     bookmark_id: str | None
 
 
 class BookmarkBatchCheckInput(BaseModel):
     """Batch bookmark check request."""
+
     issue_node_ids: list[str] = Field(..., min_length=1, max_length=50)
 
 
 class BookmarkBatchCheckOutput(BaseModel):
     """Batch bookmark check response."""
+
     bookmarks: dict[str, str | None]  # issue_node_id -> bookmark_id or null
 
 
@@ -140,8 +144,6 @@ async def list_bookmarks(
     )
 
     results = bookmarks
-    # Service now handles notes_count efficiently
-
 
     return BookmarkListOutput(
         results=results,
@@ -214,7 +216,6 @@ async def delete_bookmark(
     return {"deleted": True, "message": "Bookmark and notes deleted"}
 
 
-# Bookmark Check Endpoints
 
 @router.get("/check/{issue_node_id}", response_model=BookmarkCheckOutput)
 async def check_bookmark(
@@ -257,11 +258,7 @@ async def check_bookmarks_batch(
         issue_node_ids=body.issue_node_ids,
     )
 
-    # Convert UUIDs to strings for JSON response
-    bookmarks = {
-        node_id: str(bookmark_id) if bookmark_id else None
-        for node_id, bookmark_id in result_map.items()
-    }
+    bookmarks = {node_id: str(bookmark_id) if bookmark_id else None for node_id, bookmark_id in result_map.items()}
 
     return BookmarkBatchCheckOutput(bookmarks=bookmarks)
 
@@ -349,4 +346,3 @@ async def delete_note(
         raise HTTPException(status_code=404, detail="Note not found")
 
     return {"deleted": True, "message": "Note deleted"}
-

@@ -75,5 +75,3 @@ async def log_recommendation_events(
         raise HTTPException(status_code=400, detail="Invalid event for recommendation batch")
 
     return Response(status_code=204)
-
-

@@ -14,12 +14,12 @@ from gim_backend.services.stats_service import get_platform_stats
 router = APIRouter()
 
 
-# Default limit for public trending feed (landing page)
 PUBLIC_TRENDING_DEFAULT = 10
 
 
 class TrendingItemOutput(BaseModel):
     """Single issue in the trending feed."""
+
     node_id: str
     title: str
     body_preview: str
@@ -33,6 +33,7 @@ class TrendingItemOutput(BaseModel):
 
 class TrendingResponse(BaseModel):
     """Public trending issues response."""
+
     results: list[TrendingItemOutput]
     total: int
     page: int
@@ -42,6 +43,7 @@ class TrendingResponse(BaseModel):
 
 class StatsResponse(BaseModel):
     """Platform statistics for landing page."""
+
     total_issues: int = Field(description="Total open issues indexed")
     total_repos: int = Field(description="Total repositories indexed")
     total_languages: int = Field(description="Distinct programming languages")
@@ -74,7 +76,6 @@ async def get_trending_route(
 
     Use authenticated /feed endpoint for full personalized recommendations.
     """
-    # Convert empty lists to None for cleaner service layer
     feed = await _get_trending_feed(
         db=db,
         page=page,

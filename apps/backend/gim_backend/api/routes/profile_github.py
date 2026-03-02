@@ -32,6 +32,7 @@ router = APIRouter()
 
 class GitHubAcceptedResponse(BaseModel):
     """Response after initiating async GitHub profile fetch."""
+
     job_id: str
     status: str
     message: str
@@ -39,6 +40,7 @@ class GitHubAcceptedResponse(BaseModel):
 
 class GitHubDataResponse(BaseModel):
     """Response containing stored GitHub profile data."""
+
     status: str
     username: str
     starred_count: int
@@ -56,8 +58,7 @@ def _handle_github_error(e: Exception) -> HTTPException:
     if isinstance(e, RefreshRateLimitError):
         minutes = max(1, e.seconds_remaining // 60)
         return HTTPException(
-            status_code=429,
-            detail=f"GitHub refresh available in {minutes} minute{'s' if minutes > 1 else ''}"
+            status_code=429, detail=f"GitHub refresh available in {minutes} minute{'s' if minutes > 1 else ''}"
         )
     if isinstance(e, ClientAuthError):
         return HTTPException(status_code=400, detail="Please reconnect your GitHub account")
@@ -129,10 +130,7 @@ async def get_github(
     data = await get_github_data(db, user.id)
 
     if data is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No GitHub data found. Connect GitHub first."
-        )
+        raise HTTPException(status_code=404, detail="No GitHub data found. Connect GitHub first.")
 
     return GitHubDataResponse(
         status=data["status"],
@@ -205,9 +203,6 @@ async def delete_github_data(
     was_deleted = await delete_github(db, user.id)
 
     if not was_deleted:
-        raise HTTPException(
-            status_code=404,
-            detail="No GitHub data to delete"
-        )
+        raise HTTPException(status_code=404, detail="No GitHub data to delete")
 
     return {"deleted": True, "message": "GitHub data cleared"}

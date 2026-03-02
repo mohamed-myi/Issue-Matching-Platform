@@ -30,5 +30,3 @@ async def flush_recommendation_events(
         raise HTTPException(status_code=503, detail="Redis unavailable")
 
     return result
-
-

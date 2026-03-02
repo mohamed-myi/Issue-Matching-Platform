@@ -1,4 +1,5 @@
 """API routes for repository listing and filtering."""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -16,14 +17,13 @@ from gim_backend.services.repository_service import (
 router = APIRouter()
 
 
-# Response Models
 
 class RepositoriesResponse(BaseModel):
     """List of repositories."""
+
     repositories: list[RepositoryItem]
 
 
-# Endpoints
 
 @router.get("", response_model=RepositoriesResponse)
 async def list_repositories_endpoint(
@@ -46,6 +46,4 @@ async def list_repositories_endpoint(
         limit=limit,
     )
 
-    return RepositoriesResponse(
-        repositories=repos
-    )
+    return RepositoriesResponse(repositories=repos)
