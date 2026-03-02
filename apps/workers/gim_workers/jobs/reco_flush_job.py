@@ -3,7 +3,9 @@ import os
 import time
 
 from gim_database.session import async_session_factory
-from gim_backend.services.recommendation_event_service import flush_recommendation_event_queue_once
+from gim_backend.services.recommendation_event_service import (
+    flush_recommendation_event_queue_once,
+)
 
 
 logger = logging.getLogger(__name__)

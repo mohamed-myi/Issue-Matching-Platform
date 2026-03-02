@@ -36,24 +36,28 @@ class TestLoggingSetup:
         """setup_logging should return a job_id for correlation"""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CLOUD_RUN_EXECUTION", None)
-            
+
             with patch("gim_workers.logging_config.uuid.uuid4") as mock_uuid:
                 mock_uuid.return_value = MagicMock(
                     __str__=lambda self: "12345678-1234-1234-1234-123456789abc"
                 )
-                
+
                 from gim_workers.logging_config import setup_logging
+
                 job_id = setup_logging()
-                
+
                 # Should be first 8 chars of UUID when CLOUD_RUN_EXECUTION not set
                 assert len(job_id) == 8
 
     def test_uses_cloud_run_execution_if_available(self):
         """Should use CLOUD_RUN_EXECUTION env var when available"""
-        with patch.dict(os.environ, {"CLOUD_RUN_EXECUTION": "cloud-run-job-123"}, clear=False):
+        with patch.dict(
+            os.environ, {"CLOUD_RUN_EXECUTION": "cloud-run-job-123"}, clear=False
+        ):
             from gim_workers.logging_config import setup_logging
+
             job_id = setup_logging()
-            
+
             assert job_id == "cloud-run-job-123"
 
 
@@ -62,9 +66,9 @@ class TestJsonFormatter:
         """JsonFormatter should include job_id in output"""
         import logging
         from gim_workers.logging_config import JsonFormatter
-        
+
         formatter = JsonFormatter(job_id="test-123")
-        
+
         record = logging.LogRecord(
             name="test",
             level=logging.INFO,
@@ -74,7 +78,7 @@ class TestJsonFormatter:
             args=(),
             exc_info=None,
         )
-        
+
         output = formatter.format(record)
         assert "test-123" in output
         assert "Test message" in output
@@ -84,9 +88,9 @@ class TestJsonFormatter:
         import json
         import logging
         from gim_workers.logging_config import JsonFormatter
-        
+
         formatter = JsonFormatter(job_id="test-456")
-        
+
         record = logging.LogRecord(
             name="test.module",
             level=logging.WARNING,
@@ -96,10 +100,9 @@ class TestJsonFormatter:
             args=(),
             exc_info=None,
         )
-        
+
         output = formatter.format(record)
-        
-        # Should be valid JSON
+
         parsed = json.loads(output)
         assert parsed["severity"] == "WARNING"
         assert parsed["message"] == "Warning message"

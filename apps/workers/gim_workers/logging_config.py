@@ -13,7 +13,7 @@ def setup_logging() -> str:
     Returns a unique job_id for correlation across log entries.
     """
     job_id = os.getenv("CLOUD_RUN_EXECUTION", str(uuid.uuid4())[:8])
-    
+
     config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -40,7 +40,7 @@ def setup_logging() -> str:
             "sentence_transformers": {"level": "WARNING"},
         },
     }
-    
+
     logging.config.dictConfig(config)
     return job_id
 
@@ -66,13 +66,10 @@ class JsonFormatter(logging.Formatter):
             "job_id": self.job_id,
         }
 
-        # Include extra fields if present
         if hasattr(record, "extra") and record.extra:
             log_entry.update(record.extra)
-        
-        # Include exception info if present
+
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)
 
         return json.dumps(log_entry)
-

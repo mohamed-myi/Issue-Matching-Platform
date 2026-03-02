@@ -31,12 +31,12 @@ async def run_collector_job() -> dict:
     2. Filter via dynamic sharding
     3. Stream issues with Q-Score filtering
     4. Write issues to staging table for async embedding
-    
+
     Returns stats dict with repos_discovered and issues_staged.
     """
     job_start = time.monotonic()
     settings = get_settings()
-    
+
     if not settings.git_token:
         raise ValueError("GIT_TOKEN environment variable is required")
 
@@ -49,28 +49,25 @@ async def run_collector_job() -> dict:
     )
 
     async with GitHubGraphQLClient(settings.git_token) as client:
-        # Discover repositories via GitHub GraphQL
         scout_start = time.monotonic()
         logger.info("Starting Scout - discovering repositories")
         scout = Scout(client)
         all_repos = await scout.discover_repositories()
-        
-        # Filter repositories to process only ~1/24th based on current hour
-        # This implements Dynamic Workload Sharding to respect API rate limits
+
+
         from binascii import crc32
         from datetime import UTC, datetime
-        
+
         current_shard = datetime.now(UTC).hour
         repos = []
-        
+
         for repo in all_repos:
-            # Stable shard ID based on node_id (0-23)
             shard_id = crc32(repo.node_id.encode("utf-8")) % 24
             if shard_id == current_shard:
                 repos.append(repo)
-                
+
         scout_elapsed = time.monotonic() - scout_start
-        
+
         logger.info(
             f"Scout complete in {scout_elapsed:.1f}s - "
             f"Selected {len(repos)}/{len(all_repos)} repositories for shard {current_shard}",
@@ -78,53 +75,53 @@ async def run_collector_job() -> dict:
                 "repos_discovered": len(all_repos),
                 "repos_selected": len(repos),
                 "shard_id": current_shard,
-                "scout_duration_s": round(scout_elapsed, 1)
+                "scout_duration_s": round(scout_elapsed, 1),
             },
         )
 
         if not repos:
-            logger.warning(f"No repositories selected for shard {current_shard}; skipping collection")
+            logger.warning(
+                f"No repositories selected for shard {current_shard}; skipping collection"
+            )
             return {"repos_discovered": len(all_repos), "issues_staged": 0}
 
-        # Persist repositories (FK constraint for issues)
         persist_start = time.monotonic()
         async with async_session_factory() as session:
             persistence = StreamingPersistence(session)
             repos_upserted = await persistence.upsert_repositories(repos)
         persist_elapsed = time.monotonic() - persist_start
-            
+
         logger.info(
             f"Repositories upserted in {persist_elapsed:.1f}s: {repos_upserted}",
-            extra={"repos_upserted": repos_upserted, "persist_duration_s": round(persist_elapsed, 1)},
+            extra={
+                "repos_upserted": repos_upserted,
+                "persist_duration_s": round(persist_elapsed, 1),
+            },
         )
 
-        # Gather issues (fetch from GitHub)
         gather_start = time.monotonic()
-        
+
         logger.info(
             f"Starting Gather with concurrency={settings.gatherer_concurrency}",
             extra={"concurrency": settings.gatherer_concurrency},
         )
-        
+
         gatherer = Gatherer(
             client,
             max_issues_per_repo=settings.max_issues_per_repo,
             concurrency=settings.gatherer_concurrency,
         )
-        
-        # Collect issues into batches for staging insert
+
         issues_collected = []
         async for issue in gatherer.harvest_issues(repos):
             issues_collected.append(issue)
-            
-            # Insert in batches of 100 for memory efficiency
+
             if len(issues_collected) >= 100:
                 async with async_session_factory() as session:
                     staging = StagingPersistence(session)
                     await staging.insert_pending_issues(issues_collected)
                 issues_collected = []
-        
-        # Insert remaining issues
+
         if issues_collected:
             async with async_session_factory() as session:
                 staging = StagingPersistence(session)
@@ -132,7 +129,6 @@ async def run_collector_job() -> dict:
 
         gather_elapsed = time.monotonic() - gather_start
 
-        # Count total staged issues
         async with async_session_factory() as session:
             staging = StagingPersistence(session)
             pending_count = await staging.get_pending_count()
@@ -157,24 +153,10 @@ async def run_collector_job() -> dict:
             },
         )
 
-        # Chain embedder job to run immediately after collector
-        if pending_count > 0:
-            logger.info(
-                f"Triggering chained embedder job for {pending_count} pending issues",
-                extra={"pending_count": pending_count},
-            )
-            from gim_workers.jobs.embedder_job import run_embedder_job
-            embedder_result = await run_embedder_job()
-            logger.info(
-                f"Chained embedder complete: {embedder_result.get('issues_processed', 0)} processed",
-                extra=embedder_result,
-            )
-        else:
-            embedder_result = {}
-
+        # Collector stops at staging. Any collector->embedder orchestration is
+        # handled explicitly by the entrypoint/scheduler layer.
         return {
             "repos_discovered": len(repos),
             "pending_count": pending_count,
             "duration_s": round(job_elapsed, 1),
-            "embedder_result": embedder_result,
         }
